@@ -27,7 +27,8 @@ define Package/wrtweb
   SUBMENU:=3. Applications
   TITLE:=GL.iNet-style web admin for OpenWrt
   DEPENDS:=+luci-base +luci-compat +rpcd +rpcd-mod-luci \
-           +luci-i18n-base-zh-cn
+           +luci-i18n-base-zh-cn +lua +iwinfo +iw +ubus \
+           +block-mount +kmod-fs-ext4
   URL:=https://github.com/CodeOfMe/WrtWeb
 endef
 
@@ -42,7 +43,7 @@ endef
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ./luasrc $(PKG_BUILD_DIR)/
-	$(CP) ./htdocs $(PKG_BUILD_DIR)/
+	$(CP) ./www $(PKG_BUILD_DIR)/
 	$(CP) ./files $(PKG_BUILD_DIR)/
 endef
 
@@ -56,11 +57,18 @@ define Package/wrtweb/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci
 	$(CP) $(PKG_BUILD_DIR)/luasrc/* $(1)/usr/lib/lua/luci/
 
-	$(INSTALL_DIR) $(1)/www
-	$(CP) $(PKG_BUILD_DIR)/htdocs/* $(1)/www/
-
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(PKG_BUILD_DIR)/files/config/wrtweb $(1)/etc/config/wrtweb
+
+	# WrtWeb SPA (full admin panel) served at /wrtweb/
+	$(INSTALL_DIR) $(1)/www/wrtweb
+	$(CP) $(PKG_BUILD_DIR)/www/index.html $(PKG_BUILD_DIR)/www/style.css $(PKG_BUILD_DIR)/www/i18n.js $(1)/www/wrtweb/
+	$(INSTALL_DIR) $(1)/www/wrtweb/js
+	$(CP) $(PKG_BUILD_DIR)/www/js/*.js $(1)/www/wrtweb/js/
+
+	# JSON API backend (CGI)
+	$(INSTALL_DIR) $(1)/www/cgi-bin
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/files/www/cgi-bin/wrtweb-api $(1)/www/cgi-bin/wrtweb-api
 
 	$(INSTALL_DIR) $(1)/usr/libexec/wrtweb
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/files/usr/libexec/wrtweb/*.sh $(1)/usr/libexec/wrtweb/

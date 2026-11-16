@@ -1,44 +1,30 @@
--- WrtWeb main controller
--- Provides a GL.iNet-style menu tree: Status, Internet (Repeater/Client),
--- USB (Modem share + Storage/Samba), Guest Wi-Fi, AdGuard, System (language).
---
--- Uses CBI (Lua) views through luci-compat so it works on both old
--- (SDK 23.05) and new (SDK 24.10+/25.x, apk) OpenWrt releases.
+-- WrtWeb controller
+-- The primary "WrtWeb" menu entry opens the full single-page admin panel at
+-- /wrtweb/ (a complete GL.iNet-style panel). The legacy CBI forms remain
+-- available under WrtWeb -> Legacy Forms.
 
 module("luci.controller.wrtweb", package.seeall)
 
 function index()
+	-- Primary: redirect to the SPA panel
+	entry({"admin", "wrtweb"}, call("go_panel"), _("WrtWeb"), 1).dependent = false
+	entry({"admin", "wrtweb", "panel"}, call("go_panel"), nil).leaf = true
+
 	if not nixio.fs.access("/etc/config/wrtweb") then
 		return
 	end
 
-	-- Top level entry into the GL-like dashboard
-	entry({"admin", "wrtweb"}, alias("admin", "wrtweb", "status"),
-		_("WrtWeb"), 4).dependent = false
+	-- Legacy CBI forms (kept for compatibility / low-level edits)
+	entry({"admin", "wrtweb", "legacy"}, firstchild(), _("Legacy Forms"), 90).dependent = false
+	entry({"admin", "wrtweb", "legacy", "repeater"}, cbi("wrtweb/repeater"), _("Repeater / Client"), 10)
+	entry({"admin", "wrtweb", "legacy", "usbmodem"}, cbi("wrtweb/usbmodem"), _("USB Modem Share"), 20)
+	entry({"admin", "wrtweb", "legacy", "storage"}, cbi("wrtweb/storage"), _("USB Storage & Share"), 30)
+	entry({"admin", "wrtweb", "legacy", "guest"}, cbi("wrtweb/guest"), _("Guest Wi-Fi"), 40)
+	entry({"admin", "wrtweb", "legacy", "status"}, template("wrtweb/status"), _("Status"), 50)
+	entry({"admin", "wrtweb", "legacy", "adguard"}, template("wrtweb/adguard"), _("AdGuard Home"), 60)
+	entry({"admin", "wrtweb", "legacy", "system"}, cbi("wrtweb/system"), _("System"), 70)
+end
 
-	entry({"admin", "wrtweb", "status"},
-		template("wrtweb/status"), _("Status"), 10)
-
-	-- Internet: Repeater / Client mode (GL "Internet" section)
-	entry({"admin", "wrtweb", "repeater"},
-		cbi("wrtweb/repeater"), _("Repeater / Client"), 20)
-
-	entry({"admin", "wrtweb", "usbmodem"},
-		cbi("wrtweb/usbmodem"), _("USB Modem Share"), 30)
-
-	-- USB storage + network share (GL "USB" section)
-	entry({"admin", "wrtweb", "storage"},
-		cbi("wrtweb/storage"), _("USB Storage & Share"), 40)
-
-	-- Guest Wi-Fi
-	entry({"admin", "wrtweb", "guest"},
-		cbi("wrtweb/guest"), _("Guest Wi-Fi"), 50)
-
-	-- AdGuard Home shortcut / status
-	entry({"admin", "wrtweb", "adguard"},
-		template("wrtweb/adguard"), _("AdGuard Home"), 60)
-
-	-- System: language + info
-	entry({"admin", "wrtweb", "system"},
-		cbi("wrtweb/system"), _("System"), 90)
+function go_panel()
+	luci.http.redirect("/wrtweb/")
 end

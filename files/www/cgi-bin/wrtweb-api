@@ -1,0 +1,491 @@
+#!/usr/bin/lua
+-- WrtWeb API backend (portable CGI).
+-- Speaks JSON to the WrtWeb SPA. Uses only uci / ubus / iw / iwinfo,
+-- so it works on OpenWrt 23.05 (opkg) and 24.10+/25.x (apk).
+--
+-- Route by query param c=<resource>. GET reads, POST mutates.
+-- No external Lua deps; tiny built-in JSON encoder.
+
+------------------------------------------------------------------
+-- helpers
+------------------------------------------------------------------
+local function sh(cmd)
+  local p = io.popen(cmd .. " 2>/dev/null")
+  if not p then return "" end
+  local out = p:read("*a") or ""
+  p:close()
+  return out
+end
+
+local function trim(s)
+  local r = (s or ""):gsub("^%s+",""):gsub("%s+$","")
+  return r
+end
+
+local function uci_get(cfg, sec, opt)
+  return trim(sh("uci -q get "..cfg.."."..sec.."."..opt))
+end
+
+local function uci_set(spec, val)
+  return sh("uci set "..spec.."="..shq(val).." >/dev/null && echo ok")
+end
+
+function shq(s)
+  s = tostring(s or "")
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local function uci_commit(cfg) sh("uci commit "..cfg) end
+
+-- JSON encoder
+local function json_escape(s)
+  s = tostring(s)
+  s = s:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t')
+  s = s:gsub('[%z\1-\31]', function(c) return string.format('\\u%04x', c:byte()) end)
+  return s
+end
+
+local function encode(v, depth)
+  depth = depth or 0
+  local t = type(v)
+  if t == "nil" then return "null"
+  elseif t == "boolean" then return v and "true" or "false"
+  elseif t == "number" then
+    if v ~= v then return "null" end
+    return tostring(v)
+  elseif t == "string" then return '"'..json_escape(v)..'"'
+  elseif t == "table" then
+    local isarr = true
+    local n = 0
+    for k,_ in pairs(v) do
+      n = n + 1
+      if type(k) ~= "number" then isarr = false end
+    end
+    if isarr and n > 0 then
+      local parts = {}
+      for i=1,n do parts[#parts+1] = encode(v[i], depth+1) end
+      return "["..table.concat(parts, ",").."]"
+    elseif n == 0 then
+      return "{}"
+    else
+      local parts = {}
+      for k,val in pairs(v) do
+        parts[#parts+1] = '"'..json_escape(tostring(k))..'":'..encode(val, depth+1)
+      end
+      return "{"..table.concat(parts, ",").."}"
+    end
+  end
+  return "null"
+end
+
+-- parse query string + form body into a table
+local function parse_qs(s)
+  local out = {}
+  for k, v in (s or ""):gmatch("([^&=]+)=([^&=]*)") do
+    out[k] = v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h,16)) end)
+                :gsub("+", " ")
+  end
+  return out
+end
+
+local method = os.getenv("REQUEST_METHOD") or "GET"
+local qs = parse_qs(os.getenv("QUERY_STRING"))
+local body = ""
+if method == "POST" then
+  local len = tonumber(os.getenv("CONTENT_LENGTH") or "0") or 0
+  if len > 0 then body = io.read(len) or "" end
+  for k,v in pairs(parse_qs(body)) do qs[k] = v end
+  -- also accept raw JSON body { ... } (flat keys)
+  if body:match("^%s*{") then
+    for k, v in body:gmatch('"([%w_]+)"%s*:%s*"([^"]*)"') do qs[k] = v end
+    for k, v in body:gmatch('"([%w_]+)"%s*:%s*([%d%-%.]+)') do qs[k] = qs[k] or v end
+  end
+end
+
+local function out(tbl)
+  io.write("Content-Type: application/json\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n")
+  io.write(encode(tbl))
+end
+
+------------------------------------------------------------------
+-- resources
+------------------------------------------------------------------
+local C = {}
+local R = {}
+
+-- status / overview
+function R.overview()
+  local board = {}
+  local m = trim(sh("cat /tmp/sysinfo/model"))
+  local fw = trim(sh("grep DISTRIB_DESCRIPTION /etc/openwrt_release | cut -d= -f2 | tr -d \"'\""))
+  local up = tonumber(trim(sh("cut -d. -f1 /proc/uptime"))) or 0
+  local mem = {}
+  for k,v in sh("cat /proc/meminfo"):gmatch("(%w+):%s*(%d+)") do mem[k]=tonumber(v) end
+  local wan = trim(sh("ubus call network.interface.wan status | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+  local proto = trim(sh("uci -q get network.wan.proto"))
+  local clients = 0
+  for _ in sh("cat /tmp/dhcp.leases"):gmatch("[^\n]+") do clients = clients + 1 end
+  local nvme = trim(sh("df -h /mnt/nvme 2>/dev/null | awk 'NR==2{print $2\" \"$4}'"))
+  return {
+    model=m, firmware=fw, uptime=up, load=trim(sh("cut -d' ' -f1-3 /proc/loadavg")),
+    memtotal=mem.MemTotal and math.floor(mem.MemTotal/1024) or 0,
+    memfree=mem.MemAvailable and math.floor(mem.MemAvailable/1024) or 0,
+    wan_ip=wan, wan_proto=proto, clients=clients, storage=nvme,
+    hostname=trim(sh("cat /proc/sys/kernel/hostname"))
+  }
+end
+
+-- clients list from dhcp leases + arp + wifi stations
+function R.clients()
+  local list = {}
+  local seen = {}
+  for line in sh("cat /tmp/dhcp.leases"):gmatch("[^\n]+") do
+    local exp, mac, ip, host = line:match("(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+    if mac then
+      seen[mac] = true
+      list[#list+1] = { mac=mac, ip=ip, name=(host=="*" and "" or host), online=true, source="dhcp" }
+    end
+  end
+  for ifn in sh("iw dev"):gmatch("Interface (%S+)") do
+    for mac, sig in sh("iw dev "..ifn.." station dump"):gmatch("Station (%S+).-\n.-signal:%s*(%-?%d+)") do
+      local found
+      for _,c in ipairs(list) do if c.mac:lower()==mac:lower() then found=c end end
+      if not found then list[#list+1] = { mac=mac, ip="", name="", online=true, source="wifi" }
+      else found.online=true end
+    end
+  end
+  return { clients=list }
+end
+
+-- wireless radios + ssids
+function R.wireless()
+  local radios, ifaces = {}, {}
+  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)=wifi%-device") do
+    radios[#radios+1] = { name=sec, channel=uci_get("wireless",sec,"channel"),
+      band=uci_get("wireless",sec,"band"), disabled=uci_get("wireless",sec,"disabled") }
+  end
+  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+    ifaces[#ifaces+1] = { name=sec, ssid=uci_get("wireless",sec,"ssid"),
+      key=uci_get("wireless",sec,"key"), encryption=uci_get("wireless",sec,"encryption"),
+      device=uci_get("wireless",sec,"device"), network=uci_get("wireless",sec,"network"),
+      hidden=uci_get("wireless",sec,"hidden") }
+  end
+  return { radios=radios, ifaces=ifaces }
+end
+
+function R.wireless_set()
+  local sec = qs.iface or ""
+  if sec == "" then return { ok=false, error="missing iface" } end
+  if qs.ssid then uci_set("wireless."..sec..".ssid", qs.ssid) end
+  if qs.key then uci_set("wireless."..sec..".key", qs.key) end
+  if qs.encryption then uci_set("wireless."..sec..".encryption", qs.encryption) end
+  if qs.channel and qs.radio then uci_set("wireless."..qs.radio..".channel", qs.channel) end
+  if qs.hidden then uci_set("wireless."..sec..".hidden", qs.hidden) end
+  uci_commit("wireless"); sh("wifi reload")
+  return { ok=true }
+end
+
+-- WAN config (ethernet dhcp / pppoe / static)
+function R.wan()
+  local d = {
+    proto = uci_get("network","wan","proto"),
+    device = uci_get("network","wan","device"),
+    username = uci_get("network","wan","username"),
+    ipaddr = uci_get("network","wan","ipaddr"),
+    netmask = uci_get("network","wan","netmask"),
+    gateway = uci_get("network","wan","gateway"),
+    dns = uci_get("network","wan","dns"),
+    ip = trim(sh("ubus call network.interface.wan status | jsonfilter -e '@[\"ipv4-address\"][0].address'")),
+  }
+  return d
+end
+
+function R.wan_set()
+  local proto = qs.proto or "dhcp"
+  uci_set("network.wan.proto", proto)
+  if proto == "pppoe" then
+    if qs.username then uci_set("network.wan.username", qs.username) end
+    if qs.password then uci_set("network.wan.password", qs.password) end
+  elseif proto == "static" then
+    if qs.ipaddr then uci_set("network.wan.ipaddr", qs.ipaddr) end
+    if qs.netmask then uci_set("network.wan.netmask", qs.netmask) end
+    if qs.gateway then uci_set("network.wan.gateway", qs.gateway) end
+    if qs.dns then uci_set("network.wan.dns", qs.dns) end
+  end
+  uci_commit("network"); sh("ifup wan")
+  return { ok=true }
+end
+
+-- Repeater: scan + join
+function R.repeater_scan()
+  local nets, seen = {}, {}
+  for ifn in sh("iw dev"):gmatch("Interface (%S+)") do
+    local out_s = sh("iwinfo "..ifn.." scan")
+    local cur
+    for line in out_s:gmatch("[^\n]+") do
+      local cell = line:match("Cell %d+ %- Address: (%S+)")
+      if cell then cur = { bssid=cell } end
+      local essid = line:match('ESSID: "(.-)"')
+      if essid and cur then cur.ssid = essid end
+      local sig = line:match("Signal: (%-?%d+) dBm")
+      if sig and cur then cur.signal = tonumber(sig) end
+      local enc = line:match("Encryption: (%S+)")
+      if enc and cur then
+        cur.encryption = enc
+        if cur.ssid and not seen[cur.ssid] then seen[cur.ssid]=true; nets[#nets+1]=cur end
+        cur = nil
+      end
+    end
+    if #nets > 0 then break end
+  end
+  return { networks=nets }
+end
+
+function R.repeater_join()
+  local ssid = qs.ssid or ""
+  local key  = qs.key or ""
+  local enc  = qs.encryption or "psk2"
+  local bssid = qs.bssid or ""
+  if ssid == "" then return { ok=false, error="missing ssid" } end
+  -- create sta interface
+  local radio = trim(sh("uci -q get wireless.@wifi-iface[0].radio")); radio = radio ~= "" and radio or "radio0"
+  sh("uci -q delete wireless.wwan")
+  uci_set("wireless.wwan", "wifi-iface")
+  uci_set("wireless.wwan.device", radio)
+  uci_set("wireless.wwan.mode", "sta")
+  uci_set("wireless.wwan.ssid", ssid)
+  uci_set("wireless.wwan.network", "wwan")
+  uci_set("wireless.wwan.encryption", enc)
+  if key ~= "" then uci_set("wireless.wwan.key", key) end
+  if bssid ~= "" then uci_set("wireless.wwan.bssid", bssid) end
+  uci_commit("wireless")
+  sh("uci -q delete network.wwan")
+  uci_set("network.wwan", "interface")
+  uci_set("network.wwan.proto", "dhcp")
+  uci_commit("network")
+  sh("wifi reload"); sh("ifup wwan")
+  return { ok=true }
+end
+
+-- USB modem uplink
+function R.modem()
+  return {
+    enabled = uci_get("wrtweb","usbmodem","enabled"),
+    proto = uci_get("wrtweb","usbmodem","proto"),
+    apn = uci_get("wrtweb","usbmodem","apn"),
+    detected = trim(sh("ls /dev/cdc-wdm* /dev/ttyUSB* 2>/dev/null | head -1")),
+  }
+end
+
+function R.modem_set()
+  uci_set("wrtweb.usbmodem.enabled", qs.enabled or "1")
+  if qs.proto then uci_set("wrtweb.usbmodem.proto", qs.proto) end
+  if qs.apn then uci_set("wrtweb.usbmodem.apn", qs.apn) end
+  uci_commit("wrtweb")
+  sh("/usr/libexec/wrtweb/usbmodem.sh apply")
+  return { ok=true }
+end
+
+-- Guest network apply (delegates to the guest.sh helper)
+function R.guest_apply()
+  if qs.ssid then uci_set("wrtweb.guest.ssid", qs.ssid) end
+  if qs.key then uci_set("wrtweb.guest.key", qs.key) end
+  if qs.encryption then uci_set("wrtweb.guest.encryption", qs.encryption) end
+  if qs.isolate then uci_set("wrtweb.guest.isolate", qs.isolate) end
+  uci_set("wrtweb.guest.enabled", "1")
+  uci_commit("wrtweb")
+  sh("/usr/libexec/wrtweb/guest.sh apply")
+  return { ok=true }
+end
+
+-- LAN config
+function R.lan()
+  return {
+    ipaddr = uci_get("network","lan","ipaddr"),
+    netmask = uci_get("network","lan","netmask"),
+    dhcp_start = uci_get("dhcp","lan","start"),
+    dhcp_limit = uci_get("dhcp","lan","limit"),
+    leasetime = uci_get("dhcp","lan","leasetime"),
+  }
+end
+
+function R.lan_set()
+  if qs.ipaddr then uci_set("network.lan.ipaddr", qs.ipaddr) end
+  if qs.netmask then uci_set("network.lan.netmask", qs.netmask) end
+  if qs.dhcp_start then uci_set("dhcp.lan.start", qs.dhcp_start) end
+  if qs.dhcp_limit then uci_set("dhcp.lan.limit", qs.dhcp_limit) end
+  uci_commit("network"); uci_commit("dhcp")
+  return { ok=true, note="reconnect may be needed" }
+end
+
+-- Firewall port forwards
+function R.portforward()
+  local list = {}
+  local i = 0
+  while true do
+    local nm = uci_get("firewall", "@redirect["..i.."]", "name")
+    local tgt = uci_get("firewall", "@redirect["..i.."]", "dest_ip")
+    if tgt == "" and nm == "" then
+      local proto = uci_get("firewall", "@redirect["..i.."]", "proto")
+      if proto == "" then break end
+    end
+    list[#list+1] = {
+      idx=i, name=nm,
+      proto=uci_get("firewall","@redirect["..i.."]","proto"),
+      src_dport=uci_get("firewall","@redirect["..i.."]","src_dport"),
+      dest_ip=uci_get("firewall","@redirect["..i.."]","dest_ip"),
+      dest_port=uci_get("firewall","@redirect["..i.."]","dest_port"),
+    }
+    i = i + 1
+    if i > 64 then break end
+  end
+  return { rules=list }
+end
+
+function R.portforward_add()
+  sh("uci add firewall redirect >/dev/null")
+  uci_set("firewall.@redirect[-1].name", qs.name or "fwd")
+  uci_set("firewall.@redirect[-1].target", "DNAT")
+  uci_set("firewall.@redirect[-1].src", "wan")
+  uci_set("firewall.@redirect[-1].proto", qs.proto or "tcp")
+  uci_set("firewall.@redirect[-1].src_dport", qs.src_dport or "")
+  uci_set("firewall.@redirect[-1].dest_ip", qs.dest_ip or "")
+  uci_set("firewall.@redirect[-1].dest_port", qs.dest_port or qs.src_dport or "")
+  uci_commit("firewall"); sh("/etc/init.d/firewall reload")
+  return { ok=true }
+end
+
+function R.portforward_del()
+  local idx = qs.idx
+  if not idx then return { ok=false } end
+  sh("uci delete firewall.@redirect["..idx.."]")
+  uci_commit("firewall"); sh("/etc/init.d/firewall reload")
+  return { ok=true }
+end
+
+-- AdGuard Home
+function R.adguard()
+  local running = sh("pidof AdGuardHome | head -1")
+  local en = trim(sh("[ -x /etc/init.d/adguardhome ] && /etc/init.d/adguardhome enabled && echo 1 || echo 0"))
+  return { installed = (sh("command -v AdGuardHome")~="" and true or false) or (sh("ls /usr/bin/AdGuardHome /usr/sbin/AdGuardHome 2>/dev/null")~=""),
+           running = (running ~= ""), enabled = en, port = 3000 }
+end
+
+function R.adguard_set()
+  local act = qs.action or "status"
+  if act == "start" then sh("/etc/init.d/adguardhome start; /etc/init.d/adguardhome enable")
+  elseif act == "stop" then sh("/etc/init.d/adguardhome stop; /etc/init.d/adguardhome disable") end
+  return { ok=true }
+end
+
+-- NAS / Samba
+function R.nas()
+  local shares = {}
+  for line in sh("uci show samba 2>/dev/null"):gmatch("[^\n]+") do
+    local sec = line:match("samba%.([%w_]+)%.path='(.-)'")
+    if sec then shares[#shares+1] = { name=sec, path=line:match("path='(.-)'") } end
+  end
+  local mounts = trim(sh("mount | grep -E '/dev/sd|/dev/nvme' | awk '{print $1\" -> \"$3}'"))
+  return { samba_enabled = trim(sh("[ -x /etc/init.d/samba4 ] && /etc/init.d/samba4 enabled && echo 1")),
+           shares=shares, mounts=mounts }
+end
+
+function R.nas_set()
+  if qs.enabled == "1" then sh("/etc/init.d/samba4 enable 2>/dev/null; /etc/init.d/samba4 restart 2>/dev/null"); sh("/etc/init.d/samba enable 2>/dev/null; /etc/init.d/samba restart 2>/dev/null")
+  elseif qs.enabled == "0" then sh("/etc/init.d/samba4 stop 2>/dev/null; /etc/init.d/samba4 disable 2>/dev/null") end
+  return { ok=true }
+end
+
+-- DDNS
+function R.ddns()
+  local list = {}
+  local i = 0
+  while true do
+    local svc = uci_get("ddns", "@service["..i.."]", "service_name")
+    local dom = uci_get("ddns", "@service["..i.."]", "domain")
+    local en = uci_get("ddns", "@service["..i.."]", "enabled")
+    if svc == "" and dom == "" and en == "" then break end
+    list[#list+1] = { idx=i, service=svc, domain=dom, enabled=en }
+    i = i + 1
+    if i > 32 then break end
+  end
+  return { services=list }
+end
+
+-- VPN: wireguard + openvpn summary
+function R.vpn()
+  local wg = {}
+  for ifn in sh("wg show interfaces 2>/dev/null"):gmatch("%S+") do
+    wg[#wg+1] = { iface=ifn, peers=#sh("wg show "..ifn.." peers 2>/dev/null") }
+  end
+  local ovpn = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null | wc -l"))
+  return { wireguard=wg, ovpn_count=tonumber(ovpn) or 0,
+           wg_installed = sh("command -v wg") ~= "",
+           ovpn_installed = sh("command -v openvpn") ~= "" }
+end
+
+-- System: language / timezone / upgrade / backup / reboot / logs
+function R.system()
+  return {
+    lang = uci_get("luci","main","lang"),
+    timezone = trim(sh("cat /etc/TZ 2>/dev/null; uci -q get system.@system[0].timezone")),
+    hostname = uci_get("system","@system[0]","hostname"),
+  }
+end
+
+function R.system_set()
+  if qs.lang then uci_set("luci.main.lang", qs.lang); uci_commit("luci") end
+  if qs.hostname then uci_set("system.@system[0].hostname", qs.hostname); uci_commit("system") end
+  if qs.timezone then uci_set("system.@system[0].timezone", qs.timezone); uci_commit("system") end
+  return { ok=true }
+end
+
+function R.logs()
+  return { syslog = sh("logread -l 200 2>/dev/null") }
+end
+
+function R.reboot()
+  if qs.confirm == "1" then sh("(sleep 1; reboot) >/dev/null 2>&1 &") end
+  return { ok=true }
+end
+
+function R.backup()
+  return { note = "use /cgi-bin/wrtweb-api?c=backup_download" }
+end
+
+function R.plugins()
+  local pkgs = {}
+  local raw = sh("apk list --installed 2>/dev/null || opkg list-installed 2>/dev/null")
+  for line in raw:gmatch("[^\n]+") do
+    local name = line:match("^(%S+)")
+    if name then pkgs[#pkgs+1] = name end
+  end
+  return { packages = pkgs, count = #pkgs }
+end
+
+-- network interface status
+function R.network()
+  local ifaces = {}
+  for name in sh("ubus list 'network.interface.*'"):gmatch("network%.interface%.([%w_]+)") do
+    local up = trim(sh("ubus call network.interface."..name.." status | jsonfilter -e '@.up'"))
+    local ip = trim(sh("ubus call network.interface."..name.." status | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+    ifaces[#ifaces+1] = { name=name, up=(up=="true"), ip=ip }
+  end
+  return { interfaces=ifaces }
+end
+
+------------------------------------------------------------------
+-- dispatch
+------------------------------------------------------------------
+local c = qs.c or "overview"
+local handler = R[c]
+if not handler then
+  out({ ok=false, error="unknown resource: "..c })
+  os.exit(0)
+end
+local ok, res = pcall(handler)
+if not ok then
+  out({ ok=false, error=tostring(res) })
+else
+  out(res)
+end

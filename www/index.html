@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>WrtWeb Admin Panel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand"><span class="dot"></span> WrtWeb</div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <span id="lang-switch"></span>
+    </div>
+  </aside>
+  <main>
+    <header id="topbar">
+      <button id="menu-toggle" aria-label="menu">☰</button>
+      <h1 id="page-title">Overview</h1>
+      <div id="status-pill" class="pill">online</div>
+    </header>
+    <div id="view"></div>
+  </main>
+</div>
+<script src="i18n.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
