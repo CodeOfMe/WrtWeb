@@ -1,8 +1,9 @@
 # .github/workflows/build.yml
 #
-# Build WrtWeb as both .ipk (OpenWrt SDK 23.05) and .apk (OpenWrt SDK 24.10+)
-# for several common architectures. Artifacts are attached on every push
-# and on tags.
+# Build WrtWeb as both .ipk (OpenWrt 23.05) and .apk (OpenWrt 24.10+) across
+# several common targets. The SDK download filename is auto-discovered from the
+# target directory listing (OpenWrt does not publish stable .sh.x installers
+# for every target).
 
 name: Build WrtWeb packages
 
@@ -15,76 +16,95 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-ipk:
-    name: Build ipk (${{ matrix.arch }} / OpenWrt ${{ matrix.sdk }})
+  build:
+    name: ${{ matrix.fmt }} (${{ matrix.name }})
     runs-on: ubuntu-22.04
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         include:
-          - sdk: "23.05.3"
-            arch: "x86-64"
+          # ipk builds (opkg, OpenWrt <= 23.05)
+          - fmt: ipk
+            name: 23.05-x86_64
+            release: "23.05.5"
             target: "x86/64"
-          - sdk: "23.05.3"
-            arch: "aarch64_generic"
-            target: "ramdisk"
-          - sdk: "23.05.3"
-            arch: "arm_cortex-a7_neon-vfpv4"
-            target: "ramdisk"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: package/wrtweb
-      - name: Install SDK
-        run: |
-          curl -Ls https://downloads.openwrt.org/releases/${{ matrix.sdk }}/targets/${{ matrix.target }}/openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-11.3.0.sh.x > sdk.sh
-          chmod +x sdk.sh
-          ./sdk.sh
-      - name: Compile
-        run: |
-          cd openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-11.3.0
-          ./scripts/feeds update -a || true
-          make package/wrtweb/compile V=s
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ipk-${{ matrix.sdk }}-${{ matrix.arch }}
-          path: openwrt-sdk-*/bin/packages/${{ matrix.arch }}/wrtweb/*.ipk
-
-  build-apk:
-    name: Build apk (${{ matrix.arch }} / OpenWrt ${{ matrix.sdk }})
-    runs-on: ubuntu-22.04
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - sdk: "24.10.0"
-            arch: "x86-64"
-            target: "x86/64"
-          - sdk: "24.10.0"
-            arch: "aarch64_generic"
-            target: "ramdisk"
-          - sdk: "24.10.0"
-            arch: "aarch64_cortex-a53"
+            arch: "x86_64"
+          - fmt: ipk
+            name: 23.05-mipsel_24kc
+            release: "23.05.5"
+            target: "ramips/mt7621"
+            arch: "mipsel_24kc"
+          # apk builds (apk, OpenWrt >= 24.10)
+          - fmt: apk
+            name: 24.10-filogic
+            release: "24.10.1"
             target: "mediatek/filogic"
+            arch: "aarch64_cortex-a53"
+          - fmt: apk
+            name: 24.10-x86_64
+            release: "24.10.1"
+            target: "x86/64"
+            arch: "x86_64"
+
     steps:
       - uses: actions/checkout@v4
         with:
-          path: package/wrtweb
-      - name: Install SDK
+          path: src-package
+
+      - name: Discover + download SDK
+        working-directory: ${{ github.workspace }}
         run: |
-          curl -Ls https://downloads.openwrt.org/releases/${{ matrix.sdk }}/targets/${{ matrix.target }}/openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-13.3.0.sh.x > sdk.sh
-          chmod +x sdk.sh
-          ./sdk.sh
-      - name: Compile
+          set -euo pipefail
+          BASE="https://downloads.openwrt.org/releases/${{ matrix.release }}/targets/${{ matrix.target }}"
+          FILE=$(curl -sL "$BASE/" | grep -oE 'openwrt-sdk-[^"]+\.(tar\.xz|tar\.zst)' | head -n1)
+          echo "SDK file: $FILE"
+          curl -Ls "$BASE/$FILE" -o sdk.dl
+          case "$FILE" in
+            *.tar.zst) tar --zstd -xf sdk.dl ;;
+            *.tar.xz)  tar xf sdk.dl ;;
+          esac
+          mv openwrt-sdk-* "$HOME/sdk"
+          ls "$HOME/sdk"
+
+      - name: Place package
         run: |
-          cd openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-13.3.0
+          mkdir -p "$HOME/sdk/package/wrtweb"
+          cp -r src-package/. "$HOME/sdk/package/wrtweb/"
+          rm -rf "$HOME/sdk/package/wrtweb/.github"
+
+      - name: Update feeds
+        run: |
+          cd "$HOME/sdk"
           ./scripts/feeds update -a || true
+          ./scripts/feeds install -a -p luci || true
+
+      - name: Select config
+        run: |
+          cd "$HOME/sdk"
+          # Install LuCI feed packages so dependency tree resolves
+          ./scripts/feeds update -a || true
+          ./scripts/feeds install luci || true
+          cat >> .config <<'CFG'
+          CONFIG_PACKAGE_wrtweb=y
+          CFG
+          make defconfig
+
+      - name: Compile wrtweb
+        run: |
+          cd "$HOME/sdk"
           make package/wrtweb/compile V=s
-      - name: Upload artifacts
+
+      - name: Collect artifacts
+        run: |
+          cd "$HOME/sdk"
+          find bin/packages -name 'wrtweb*.${{ matrix.fmt }}' -exec cp {} "$GITHUB_WORKSPACE/" \;
+
+      - name: Show artifacts
+        run: ls -la "$GITHUB_WORKSPACE"/*.${{ matrix.fmt }} 2>/dev/null || true
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.sdk }}-${{ matrix.arch }}
-          path: openwrt-sdk-*/bin/packages/${{ matrix.arch }}/wrtweb/*.apk
+          name: wrtweb-${{ matrix.fmt }}-${{ matrix.name }}
+          path: ${{ github.workspace }}/wrtweb*.${{ matrix.fmt }}

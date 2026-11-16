@@ -29,7 +29,6 @@ define Package/wrtweb
   DEPENDS:=+luci-base +luci-compat +rpcd +rpcd-mod-luci \
            +luci-i18n-base-zh-cn
   URL:=https://github.com/CodeOfMe/WrtWeb
-  DEFAULT:=y if LUCI
 endef
 
 define Package/wrtweb/description
