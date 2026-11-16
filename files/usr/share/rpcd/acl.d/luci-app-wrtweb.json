@@ -1,0 +1,17 @@
+{
+	"wrtweb": {
+		"description": "WrtWeb - GL-style admin ACL",
+		"read": {
+			"ubus": {
+				"file": [ "stat", "read" ],
+				"network.interface": [ "status", "dump" ],
+				"system": [ "board", "info" ],
+				"iwinfo": [ "scanlist", "getinfo" ]
+			},
+			"uci": [ "wrtweb", "wireless", "network" ]
+		},
+		"write": {
+			"uci": [ "wrtweb" ]
+		}
+	}
+}

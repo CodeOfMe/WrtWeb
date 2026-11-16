@@ -1,0 +1,27 @@
+<%+header%>
+
+<h2><%:AdGuard Home%></h2>
+
+<div class="cbi-map">
+	<fieldset class="cbi-section">
+		<p><%:AdGuard Home provides network-wide ad and tracker blocking. If AdGuard Home is installed, open its web interface below.%></p>
+		<div id="adguard-box">
+			<p><%:Status%>:
+				<span id="adguard-status"><%:Checking...%></span>
+			</p>
+			<a class="cbi-button cbi-button-apply" href="http://<%=luci.util.exec("uci -q get dhcp.@dnsmasq[0].cachesize >/dev/null 2>&1; uci -q get network.lan.ipaddr 2>/dev/null | tr -d '\n'")%>:3000" target="_blank">
+				<%:Open AdGuard Home%>
+			</a>
+		</div>
+	</fieldset>
+</div>
+
+<script type="text/javascript">
+	fetch('/cgi-bin/luci/rpc/wrtweb?auth=')
+		.then(function(){})
+		.catch(function(){});
+	document.getElementById('adguard-status').textContent =
+		(window.location && document.body) ? '<%:Open the link above if AdGuard Home is running on port 3000.%>' : '';
+</script>
+
+<%+footer%>

@@ -1,0 +1,26 @@
+# WrtWeb default configuration
+
+config repeater 'repeater'
+	option enabled '0'
+	option mode 'client'
+	option encryption 'psk2'
+	option band 'any'
+
+config usbmodem 'usbmodem'
+	option enabled '0'
+	option proto 'dhcp'
+
+config storage 'storage'
+	option automount '1'
+	option mountpoint '/mnt'
+
+config smb 'smb'
+	option enabled '0'
+	option guest '1'
+	option name 'usb'
+
+config guest 'guest'
+	option enabled '0'
+	option ssid 'guest'
+	option encryption 'psk2'
+	option isolate '1'

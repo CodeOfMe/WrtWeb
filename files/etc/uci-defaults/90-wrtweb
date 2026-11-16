@@ -1,0 +1,4 @@
+#!/bin/sh
+# Ensure the wrtweb UCI config exists and register the menu on first boot.
+[ -f /etc/config/wrtweb ] || cp /rom/etc/config/wrtweb /etc/config/wrtweb 2>/dev/null || touch /etc/config/wrtweb
+exit 0

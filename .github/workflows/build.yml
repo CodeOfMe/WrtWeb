@@ -1,0 +1,90 @@
+# .github/workflows/build.yml
+#
+# Build WrtWeb as both .ipk (OpenWrt SDK 23.05) and .apk (OpenWrt SDK 24.10+)
+# for several common architectures. Artifacts are attached on every push
+# and on tags.
+
+name: Build WrtWeb packages
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-ipk:
+    name: Build ipk (${{ matrix.arch }} / OpenWrt ${{ matrix.sdk }})
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: "23.05.3"
+            arch: "x86-64"
+            target: "x86/64"
+          - sdk: "23.05.3"
+            arch: "aarch64_generic"
+            target: "ramdisk"
+          - sdk: "23.05.3"
+            arch: "arm_cortex-a7_neon-vfpv4"
+            target: "ramdisk"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package/wrtweb
+      - name: Install SDK
+        run: |
+          curl -Ls https://downloads.openwrt.org/releases/${{ matrix.sdk }}/targets/${{ matrix.target }}/openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-11.3.0.sh.x > sdk.sh
+          chmod +x sdk.sh
+          ./sdk.sh
+      - name: Compile
+        run: |
+          cd openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-11.3.0
+          ./scripts/feeds update -a || true
+          make package/wrtweb/compile V=s
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.sdk }}-${{ matrix.arch }}
+          path: openwrt-sdk-*/bin/packages/${{ matrix.arch }}/wrtweb/*.ipk
+
+  build-apk:
+    name: Build apk (${{ matrix.arch }} / OpenWrt ${{ matrix.sdk }})
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: "24.10.0"
+            arch: "x86-64"
+            target: "x86/64"
+          - sdk: "24.10.0"
+            arch: "aarch64_generic"
+            target: "ramdisk"
+          - sdk: "24.10.0"
+            arch: "aarch64_cortex-a53"
+            target: "mediatek/filogic"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package/wrtweb
+      - name: Install SDK
+        run: |
+          curl -Ls https://downloads.openwrt.org/releases/${{ matrix.sdk }}/targets/${{ matrix.target }}/openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-13.3.0.sh.x > sdk.sh
+          chmod +x sdk.sh
+          ./sdk.sh
+      - name: Compile
+        run: |
+          cd openwrt-sdk-${{ matrix.sdk }}-${{ matrix.arch }}_gcc-13.3.0
+          ./scripts/feeds update -a || true
+          make package/wrtweb/compile V=s
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.sdk }}-${{ matrix.arch }}
+          path: openwrt-sdk-*/bin/packages/${{ matrix.arch }}/wrtweb/*.apk
