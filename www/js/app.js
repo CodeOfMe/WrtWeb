@@ -43,6 +43,8 @@
 
   /* ---------------- dom helpers ---------------- */
   const $ = (s, el) => (el || document).querySelector(s);
+  // Normalize a possibly-empty Lua table ({} for empty array) to a JS array.
+  const arr = (x) => (Array.isArray(x) ? x : []);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -152,7 +154,7 @@
 
   VIEWS.internet = async function () {
     const [ov, nets] = await Promise.all([apiGet("overview"), apiGet("repeater_scan")]);
-    const list = (nets.networks || []);
+    const list = arr(nets.networks);
     let rows = list.length
       ? list.map(n => `<div class="list-item">
           <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
@@ -238,7 +240,7 @@
 
   VIEWS.clients = async function () {
     const d = await apiGet("clients");
-    const rows = (d.clients || []).map(c => `<tr>
+    const rows = arr(d.clients).map(c => `<tr>
       <td>${esc(c.name || "-")}</td><td>${esc(c.ip || "-")}</td>
       <td class="small">${esc(c.mac || "")}</td>
       <td>${c.online ? `<span class="tag on">online</span>` : `<span class="tag off">off</span>`}</td>
@@ -251,7 +253,7 @@
 
   VIEWS.wireless = async function () {
     const d = await apiGet("wireless");
-    const ifaces = (d.ifaces || []).map(i => `<div class="card">
+    const ifaces = arr(d.ifaces).map(i => `<div class="card">
       <h2>${esc(i.ssid || i.name)} <span class="tag">${esc(i.device || "")}</span></h2>
       <div class="row">
         <div><label>${esc(t("ssid"))}</label><input data-f="ssid" data-sec="${esc(i.name)}" value="${esc(i.ssid||"")}"></div>
@@ -298,7 +300,7 @@
 
   VIEWS.guest = async function () {
     const d = await apiGet("wireless");
-    const guest = (d.ifaces || []).find(i => i.network === "guest");
+    const guest = arr(d.ifaces).find(i => i.network === "guest");
     return wrap(`<div class="card"><h2>${esc(t("guest"))}</h2>
       <p class="muted small">Guest network is an isolated SSID with its own firewall zone.</p>
       <div class="row">
@@ -318,7 +320,7 @@
 
   VIEWS.ports = async function () {
     const d = await apiGet("portforward");
-    const rows = (d.rules || []).map(r => `<tr>
+    const rows = arr(d.rules).map(r => `<tr>
       <td>${esc(r.name)}</td><td>${esc(r.proto)}</td><td>${esc(r.src_dport)}</td>
       <td>${esc(r.dest_ip)}:${esc(r.dest_port)}</td>
       <td><button class="ghost" data-del="${r.idx}">${esc(t("remove"))}</button></td></tr>`).join("");
@@ -388,7 +390,7 @@
 
   VIEWS.ddns = async function () {
     const d = await apiGet("ddns");
-    const rows = (d.services||[]).map(s=>`<tr><td>${esc(s.service)}</td><td>${esc(s.domain)}</td><td>${esc(s.enabled)}</td></tr>`).join("");
+    const rows = arr(d.services).map(s=>`<tr><td>${esc(s.service)}</td><td>${esc(s.domain)}</td><td>${esc(s.enabled)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("ddns"))}</h2>
       <table><thead><tr><th>Service</th><th>Domain</th><th>${esc(t("enabled"))}</th></tr></thead>
       <tbody>${rows||`<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
@@ -397,7 +399,7 @@
 
   VIEWS.vpn = async function () {
     const d = await apiGet("vpn");
-    const wg = (d.wireguard||[]).map(w=>`<tr><td>${esc(w.iface)}</td><td>${esc(w.peers)}</td></tr>`).join("");
+    const wg = arr(d.wireguard).map(w=>`<tr><td>${esc(w.iface)}</td><td>${esc(w.peers)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("vpn"))}</h2>
       <div class="grid">
         ${stat("WireGuard", d.wg_installed ? t("installed") : t("not_installed"))}
@@ -410,7 +412,7 @@
 
   VIEWS.plugins = async function () {
     const d = await apiGet("plugins");
-    const pkgs = (d.packages || []);
+    const pkgs = arr(d.packages);
     const rows = pkgs.slice(0, 500).map(p=>`<tr><td class="small">${esc(p)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("plugins"))} (${d.count||0})</h2>
       <pre class="log">${esc(pkgs.join("\n"))}</pre></div>`);
