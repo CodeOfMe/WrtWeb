@@ -1,3 +1,5 @@
+local _ = (type(_) == "function" and _) or require("luci.i18n").translate
+
 -- USB storage + network share (GL.iNet "USB / Network Storage")
 -- Auto-mounts USB block devices and exports them over Samba (SMB).
 

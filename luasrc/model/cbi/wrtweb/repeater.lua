@@ -1,3 +1,5 @@
+local _ = (type(_) == "function" and _) or require("luci.i18n").translate
+
 -- Repeater / Client mode (GL.iNet "Internet" feature)
 -- Scans nearby Wi-Fi, lets the user join an upstream SSID as a client
 -- (sta) and re-broadcast on the local AP. Implemented over OpenWrt's

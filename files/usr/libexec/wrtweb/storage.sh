@@ -26,7 +26,7 @@ samba_export() {
 	name="$(uci -q get wrtweb.smb.name)"; name="${name:-usb}"
 	guest="$(uci -q get wrtweb.smb.guest)"
 	path="$BASE"
-	conf=/etc/smb.conf
+	conf="${SMB_CONF:-/etc/smb.conf}"
 	cat > "$conf" <<EOF
 [global]
    workgroup = WORKGROUP

@@ -1,3 +1,5 @@
+local _ = (type(_) == "function" and _) or require("luci.i18n").translate
+
 -- USB cellular modem share (GL.iNet "USB Modem / Tethering")
 -- Brings up a USB QMI/MBIM/NCM/PPP cellular modem as a WAN uplink and
 -- routes LAN traffic through it.

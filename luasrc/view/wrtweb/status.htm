@@ -2,22 +2,42 @@
 
 <h2><%:WrtWeb Status%></h2>
 
+<%
+	local sys = require "luci.sys"
+	local util = require "luci.util"
+	local function sh(cmd) return (sys.exec(cmd) or ""):gsub("%s+$","") end
+	local up = sys.uptime() or 0
+	local days = math.floor(up/86400)
+	local hours = math.floor((up%86400)/3600)
+	local mins = math.floor((up%3600)/60)
+	local uptime_str = string.format("%dd %dh %dm", days, hours, mins)
+	local wan_ip = sh("ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@[\"ipv4-address\"][0].address' 2>/dev/null")
+	if wan_ip == "" then wan_ip = "-" end
+%>
+
 <div class="cbi-map">
 	<fieldset class="cbi-section">
 		<legend><%:Device%></legend>
 		<table class="table">
-			<tr><td><%:Model%></td><td><%=luci.sys.exec("cat /tmp/sysinfo/model 2>/dev/null")%></td></tr>
-			<tr><td><%:Firmware%></td><td><%=luci.sys.exec("cat /etc/openwrt_release | grep DISTRIB_DESCRIPTION | cut -d= -f2 | tr -d \"'\"")%></td></tr>
-			<tr><td><%:Kernel%></td><td><%=luci.sys.exec("uname -r")%></td></tr>
-			<tr><td><%:Load average%></td><td><%=luci.sys.exec("cat /proc/loadavg")%></td></tr>
-			<tr><td><%:Uptime%></td><td><%=luci.util.format_time(luci.sys.uptime())%></td></tr>
+			<tr><td><%:Model%></td><td><%=sh("cat /tmp/sysinfo/model 2>/dev/null")%></td></tr>
+			<tr><td><%:Firmware%></td><td><%=sh("cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_DESCRIPTION | cut -d= -f2 | tr -d \"'\"")%></td></tr>
+			<tr><td><%:Kernel%></td><td><%=sh("uname -r")%></td></tr>
+			<tr><td><%:Load average%></td><td><%=sh("cat /proc/loadavg")%></td></tr>
+			<tr><td><%:Uptime%></td><td><%=uptime_str%></td></tr>
 		</table>
 	</fieldset>
 
 	<fieldset class="cbi-section">
 		<legend><%:Network%></legend>
 		<table class="table">
-			<tr><td><%:WAN IP%></td><td><%=luci.util.webdata and "" or luci.sys.exec("ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@[\"ipv4-address\"][0].address' 2>/dev/null")%></td></tr>
+			<tr><td><%:WAN IPv4%></td><td><%=wan_ip%></td></tr>
+		</table>
+	</fieldset>
+
+	<fieldset class="cbi-section">
+		<legend><%:Storage%></legend>
+		<table class="table">
+			<tr><td><%:NVMe (/mnt/nvme)%></td><td><%=sh("df -h /mnt/nvme 2>/dev/null | awk 'NR==2{print $2\" total, \"$4\" free\"}'")%></td></tr>
 		</table>
 	</fieldset>
 </div>

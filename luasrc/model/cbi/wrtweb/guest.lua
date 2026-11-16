@@ -1,3 +1,5 @@
+local _ = (type(_) == "function" and _) or require("luci.i18n").translate
+
 -- Guest Wi-Fi (GL.iNet "Guest Network")
 -- Creates a guest SSID on the primary radio, isolated from the LAN.
 
