@@ -77,6 +77,23 @@ local function crypto_for(scan_enc)
   return "psk2"
 end
 
+-- UCI section of the station (client) interface, its live interface name and radio
+local function sta_iface()
+  local sec, ifn, dev = "", "", ""
+  -- section names are either named (wireless.wwan) or anonymous (wireless.@wifi-iface[0])
+  for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='sta'") do
+    sec = name; dev = uci_get("wireless", name, "device") break
+  end
+  if sec ~= "" then
+    -- %s* so the match still works when ubus pretty-prints its JSON
+    for s, n in sh("ubus call network.wireless status 2>/dev/null"):gmatch(
+        '"section"%s*:%s*"([^"]+)"%s*.-%s*"ifname"%s*:%s*"([^"]+)"') do
+      if s == sec then ifn = n break end
+    end
+  end
+  return sec, ifn, dev
+end
+
 -- parse a UCI config into section -> option values
 local function uci_sections(cfg)
   local secs = {}
@@ -539,6 +556,83 @@ function R.wan_set()
 end
 
 -- Repeater: scan + join
+-- IEEE MA-L prefixes, one per vendor, taken from the IEEE assignment list
+local OUI = {
+  { prefix = "60:FD:A6", vendor = "Apple" }, { prefix = "60:70:6C", vendor = "Google" },
+  { prefix = "AC:C0:48", vendor = "OnePlus" }, { prefix = "60:1A:C7", vendor = "Nintendo" },
+  { prefix = "E4:3B:C9", vendor = "Hisense" }, { prefix = "00:22:DE", vendor = "OPPO" },
+  { prefix = "64:1B:2F", vendor = "Samsung" }, { prefix = "CC:EB:5E", vendor = "Xiaomi" },
+  { prefix = "E0:06:30", vendor = "Huawei" }, { prefix = "68:DD:B7", vendor = "TP-Link" },
+  { prefix = "64:EC:65", vendor = "vivo" }, { prefix = "84:28:59", vendor = "Amazon" },
+  { prefix = "70:F8:AE", vendor = "Microsoft" }, { prefix = "E4:C7:67", vendor = "Intel" },
+  { prefix = "D8:3A:DD", vendor = "Raspberry Pi" }, { prefix = "E8:0A:B9", vendor = "Cisco" },
+  { prefix = "9C:C9:EB", vendor = "Netgear" }, { prefix = "F0:9F:C2", vendor = "Ubiquiti" },
+  { prefix = "08:55:31", vendor = "MikroTik" }, { prefix = "10:06:1C", vendor = "Espressif" },
+  { prefix = "1C:90:FF", vendor = "Tuya" }, { prefix = "F0:1B:24", vendor = "ZTE" },
+  { prefix = "5C:A0:6C", vendor = "Realme" }, { prefix = "48:C3:5A", vendor = "Lenovo" },
+  { prefix = "00:26:18", vendor = "ASUSTek" }, { prefix = "0C:B9:83", vendor = "Honor" },
+  { prefix = "5C:CD:7C", vendor = "Meizu" }, { prefix = "AC:80:0A", vendor = "Sony" }
+}
+
+-- n random bytes as hex
+local function rand_hex(nbytes)
+  return trim(sh("hexdump -v -e '" .. nbytes .. "/1 \"%02x\"' -n " .. nbytes .. " /dev/urandom"))
+end
+
+local function mac_from_hex(h)
+  if #h ~= 12 then return nil end
+  return (h:sub(1,2) .. ":" .. h:sub(3,4) .. ":" .. h:sub(5,6) .. ":" ..
+          h:sub(7,8) .. ":" .. h:sub(9,10) .. ":" .. h:sub(11,12)):upper()
+end
+
+-- a vendor prefix (3 bytes) plus random rest, or a locally administered MAC when empty
+local function random_mac(prefix)
+  local p = (prefix or ""):gsub("[^%x]", ""):upper()
+  if p == "" then p = "02" .. rand_hex(5)
+  elseif #p == 6 then p = p .. rand_hex(3)
+  else return nil end
+  return mac_from_hex(p)
+end
+
+local ADDR_SOURCE = { [0] = "permanent", [1] = "random", [2] = "set by user", [3] = "fallback" }
+
+function R.repeater_mac()
+  local sec, ifn, _ = sta_iface()
+  local cur, typ = "", ""
+  if ifn ~= "" then
+    cur = trim(sh("cat /sys/class/net/" .. ifn .. "/address 2>/dev/null"))
+    typ = trim(sh("cat /sys/class/net/" .. ifn .. "/addr_assign_type 2>/dev/null"))
+  end
+  return {
+    section = sec, iface = ifn, current = cur,
+    source = ADDR_SOURCE[tonumber(typ)] or "",
+    configured = uci_get("wrtweb", "repeater", "macaddr") or "",
+    vendors = OUI,
+  }
+end
+
+function R.repeater_mac_set()
+  local mode = qs.mode or "off"
+  local mac = nil
+  if mode == "off" then mac = nil
+  elseif mode == "clone" then mac = norm_mac(qs.mac)
+  elseif mode == "random" then mac = random_mac("")
+  elseif mode == "vendor" then
+    local p = (qs.prefix or ""):gsub("[^%x]", ""):upper()
+    if #p ~= 6 then return { ok = false, error = "OUI prefix must be 6 hex digits" } end
+    mac = random_mac(p)
+  else return { ok = false, error = "unknown mode" } end
+  if mode ~= "off" and not mac then return { ok = false, error = "no mac" } end
+
+  if mac then uci_set("wrtweb.repeater.macaddr", mac)
+  else sh("uci -q delete wrtweb.repeater.macaddr >/dev/null 2>&1") end
+  uci_commit("wrtweb")
+
+  -- repeater.sh writes option macaddr on the station interface and reloads wireless
+  local msg = trim(sh("sh /usr/libexec/wrtweb/repeater.sh apply 2>/dev/null"))
+  return { ok = true, mac = mac or "", message = msg }
+end
+
 function R.repeater_scan()
   -- ifname -> wifi-device section, so each row can say which radio found it
   local iface_radio = {}
@@ -612,22 +706,6 @@ function R.repeater_scan()
   return { networks = aps, groups = groups, total = total, radios = radios }
 end
 
--- UCI section of the station (client) interface, its live interface name and radio
-local function sta_iface()
-  local sec, ifn, dev = "", "", ""
-  -- section names are either named (wireless.wwan) or anonymous (wireless.@wifi-iface[0])
-  for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='sta'") do
-    sec = name; dev = uci_get("wireless", name, "device") break
-  end
-  if sec ~= "" then
-    -- %s* so the match still works when ubus pretty-prints its JSON
-    for s, n in sh("ubus call network.wireless status 2>/dev/null"):gmatch(
-        '"section"%s*:%s*"([^"]+)"%s*.-%s*"ifname"%s*:%s*"([^"]+)"') do
-      if s == sec then ifn = n break end
-    end
-  end
-  return sec, ifn, dev
-end
 
 function R.repeater_status()
   local cfg = uci_sections("wrtweb")["repeater"] or {}

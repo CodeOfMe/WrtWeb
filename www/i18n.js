@@ -135,6 +135,10 @@ window.I18N = {
       add_peer:"Add peer", optional:"optional", create:"Create",
       best:"best", pinned:"pinned", access_points:"access points", radios:"radios",
       hidden_ssid:"(hidden)",
+      configured:"Configured", mode:"Mode", client:"Client", vendor:"Vendor",
+      keep_current:"Keep the interface's own MAC", clone_mac:"Clone a client",
+      vendor_prefix:"Vendor (OUI prefix)", random_local:"Random (locally administered)",
+      mac_note:"The address is set on the station interface only, so the local access point keeps its own. mac80211 applies it when the interface is reloaded.",
       wg_note:"AstroWarp is the open-source WireGuard stack (netifd's wireguard proto): create an interface, add peers by public key.",
       wg_peer_note:"Paste the peer's own public key - the peer keeps its private key. netifd applies the change on save."
     }
@@ -274,6 +278,10 @@ window.I18N = {
       add_peer:"添加对端", optional:"可选", create:"创建",
       best:"最佳", pinned:"已锁定", access_points:"个接入点", radios:"个射频",
       hidden_ssid:"（隐藏）",
+      configured:"已配置", mode:"方式", client:"客户端", vendor:"厂商",
+      keep_current:"使用接口自身的 MAC", clone_mac:"克隆某个客户端",
+      vendor_prefix:"厂商（OUI 前缀）", random_local:"随机（本地管理）",
+      mac_note:"该地址只作用于客户端接口，本地热点保留自己的地址；接口重新加载时由 mac80211 应用。",
       wg_note:"AstroWarp 即开源的 WireGuard（netifd 的 wireguard 协议）：新建接口，按公钥添加对端。",
       wg_peer_note:"粘贴对端自己的公钥，对端保留它的私钥；保存后由 netifd 应用。"
     }

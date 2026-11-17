@@ -74,6 +74,9 @@ ensure_iface() {
 	uci set "wireless.$sec.network=$NET"
 	uci set "wireless.$sec.disabled=0"
 	if [ -n "$(g bssid)" ]; then uci set "wireless.$sec.bssid=$(g bssid)"; fi
+	# option macaddr is honoured by mac80211.sh, so the station can present another MAC
+	m="$(g macaddr)"
+	if [ -n "$m" ]; then uci set "wireless.$sec.macaddr=$m"; else uci -q delete "wireless.$sec.macaddr" 2>/dev/null; fi
 
 	uci -q get network.$NET >/dev/null 2>&1 || uci set "network.$NET=interface"
 	uci set "network.$NET.proto=dhcp"

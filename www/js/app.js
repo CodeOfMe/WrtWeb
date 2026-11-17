@@ -337,7 +337,8 @@
   }
 
   VIEWS.repeater = async function () {
-    const [s, scan] = await Promise.all([apiGet("repeater_status"), apiGet("repeater_scan")]);
+    const [s, scan, mc, cl] = await Promise.all([
+      apiGet("repeater_status"), apiGet("repeater_scan"), apiGet("repeater_mac"), apiGet("clients")]);
     const c = s.config || {};
     const up = s.uptime || 0;
     const uh = Math.floor(up / 3600), um = Math.floor((up % 3600) / 60);
@@ -380,6 +381,30 @@
         <div class="btn-row"><button id="rp-join">${esc(t("connect"))}</button></div>
         <p class="small muted">${esc(t("repeater_page_note", "v"))}</p>
       </div>
+      <div class="card"><h2>${esc(t("mac", "v"))}</h2>
+        <div class="grid">
+          ${stat(t("interface", "v"), mc.iface || "-")}
+          ${stat(t("mac", "v"), mc.current || "-")}
+          ${stat(t("source", "v"), mc.source || "-")}
+          ${stat(t("configured", "v"), mc.configured || t("none"))}
+        </div>
+        <div class="row">
+          <div><label>${esc(t("mode", "v"))}</label><select id="mac-mode">
+            <option value="off">${esc(t("keep_current", "v"))}</option>
+            <option value="clone">${esc(t("clone_mac", "v"))}</option>
+            <option value="vendor">${esc(t("vendor_prefix", "v"))}</option>
+            <option value="random">${esc(t("random_local", "v"))}</option>
+          </select></div>
+          <div><label>${esc(t("client", "v"))}</label><select id="mac-client">
+            ${arr(cl.clients).map(x => `<option value="${esc(x.mac)}">${esc(x.name || x.mac)}</option>`).join("")}
+          </select></div>
+          <div><label>${esc(t("vendor", "v"))}</label><select id="mac-vendor">
+            ${arr(mc.vendors).map(v => `<option value="${esc(v.prefix)}">${esc(v.vendor)} · ${esc(v.prefix)}</option>`).join("")}
+          </select></div>
+        </div>
+        <div class="btn-row"><button id="mac-apply">${esc(t("apply"))}</button></div>
+        <p class="small muted">${esc(t("mac_note", "v"))}</p>
+      </div>
       <div class="card"><h2>${esc(t("scan"))}</h2>
         <p class="small muted">${scan.total || 0} ${esc(t("access_points", "v"))} · ${scan.radios || 0} ${esc(t("radios", "v"))} · ${arr(scan.groups).length} ${esc(t("networks", "v"))}</p>
         <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button></div>
@@ -414,6 +439,16 @@
     if (rec) rec.onclick = () => act("reconnect");
     const stop = $("#rp-stop");
     if (stop) stop.onclick = () => act("stop");
+    const macApply = $("#mac-apply");
+    if (macApply) macApply.onclick = async () => {
+      const mode = $("#mac-mode").value;
+      const body = { mode };
+      if (mode === "clone") body.mac = $("#mac-client").value;
+      if (mode === "vendor") body.prefix = $("#mac-vendor").value;
+      const r = await apiPost("repeater_mac_set", body);
+      toast(r.ok ? (r.message || t("saved")) : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      if (r.ok) render();
+    };
     function bind() {
       document.querySelectorAll("[data-join]").forEach(b => {
         b.onclick = () => join(b.getAttribute("data-join"), b.getAttribute("data-enc"),
