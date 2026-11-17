@@ -5,7 +5,7 @@ without the OpenWrt SDK. Outputs to dist/.
 import os, sys, tarfile, io, gzip, shutil, time, stat
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VER = "0.3.2"
+VER = "0.3.3"
 PKG = "wrtweb"
 DESC = "GL.iNet-style web admin panel for OpenWrt (repeater/hotspot/VPN/NAS/mirror/theme)"
 DIST = os.path.join(ROOT, "dist")
@@ -87,26 +87,17 @@ def build_ipk():
         ).encode()
         add_to_tar(tf, "./postinst", postinst, 0o755, now)
     control_tgz = cbuf.getvalue()
-    # ar archive
+    # OpenWrt-style ipk = outer tar.gz holding debian-binary, control.tar.gz,
+    # data.tar.gz. (A Debian 'ar' archive is rejected by OpenWrt's opkg as
+    # "Malformed package file".)
     out = os.path.join(DIST, f"{PKG}_{VER}_all.ipk")
-    def ar_member(fh, name, data):
-        hdr = b""
-        hdr += name.ljust(16).encode()
-        hdr += b"0".ljust(12)         # mtime
-        hdr += b"0".ljust(6)          # uid
-        hdr += b"0".ljust(6)          # gid
-        hdr += b"100644".ljust(8)     # mode
-        hdr += str(len(data)).ljust(10).encode()
-        hdr += b"`\n"
-        fh.write(hdr)
-        fh.write(data)
-        if len(data) % 2 == 1:
-            fh.write(b"\n")
+    obuf = io.BytesIO()
+    with tarfile.open(fileobj=obuf, mode="w:gz", format=tarfile.GNU_FORMAT) as tf:
+        add_to_tar(tf, "./debian-binary", b"2.0\n", 0o644, now)
+        add_to_tar(tf, "./control.tar.gz", control_tgz, 0o644, now)
+        add_to_tar(tf, "./data.tar.gz", data, 0o644, now)
     with open(out, "wb") as fh:
-        fh.write(b"!<arch>\n")
-        ar_member(fh, "debian-binary", b"2.0\n")
-        ar_member(fh, "control.tar.gz", control_tgz)
-        ar_member(fh, "data.tar.gz", data)
+        fh.write(obuf.getvalue())
     return out
 
 def build_apk():
