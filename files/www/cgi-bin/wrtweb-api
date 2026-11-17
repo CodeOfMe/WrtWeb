@@ -424,6 +424,50 @@ function R.vpn()
            ovpn_installed = sh("command -v openvpn") ~= "" }
 end
 
+-- Clash / Mihomo proxy core
+function R.clash()
+  local inst = trim(sh("command -v mihomo")) ~= "" or trim(sh("command -v clash")) ~= ""
+  local running = trim(sh("pidof mihomo clash 2>/dev/null | head -1")) ~= ""
+  return { installed = inst, running = running }
+end
+
+function R.clash_set()
+  local act = qs.action or "status"
+  if act == "start" then
+    sh("/etc/init.d/mihomo start 2>/dev/null; /etc/init.d/mihomo enable 2>/dev/null")
+    sh("(mihomo -d /etc/mihomo -f /etc/mihomo/config.yaml >/dev/null 2>&1 &)")
+  elseif act == "stop" then
+    sh("/etc/init.d/mihomo stop 2>/dev/null")
+    sh("killall mihomo 2>/dev/null")
+  end
+  return { ok=true }
+end
+
+-- Package mirror source selection (TUNA / USTC / official)
+local function mirror_file()
+  local f = "/etc/apk/repositories.d/distfeeds.list"
+  if trim(sh("test -f "..f.." && echo y")) ~= "y" then f = "/etc/apk/repositories" end
+  return f
+end
+
+function R.mirror()
+  local f = mirror_file()
+  local first = trim(sh("head -1 "..f))
+  local host = first:match("^[a-zA-Z]+://([^/]+)") or ""
+  return { host = host, file = f,
+           opkg = (sh("command -v opkg") ~= "") }
+end
+
+function R.mirror_set()
+  local mode = qs.mode or "auto"
+  if not mode:match("^[a-z]+$") then return { ok=false, error="bad mode" } end
+  if mode ~= "auto" and mode ~= "tuna" and mode ~= "ustc" and mode ~= "official" then
+    return { ok=false, error="bad mode" }
+  end
+  local out = sh("/usr/libexec/wrtweb/mirror.sh "..mode.." 2>&1")
+  return { ok = (out:match("^OK") ~= nil), output = out, mode = mode }
+end
+
 -- System: language / timezone / upgrade / backup / reboot / logs
 function R.system()
   return {

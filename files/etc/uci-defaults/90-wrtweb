@@ -1,4 +1,8 @@
 #!/bin/sh
-# Ensure the wrtweb UCI config exists and register the menu on first boot.
+# Ensure the wrtweb UCI config exists.
 [ -f /etc/config/wrtweb ] || cp /rom/etc/config/wrtweb /etc/config/wrtweb 2>/dev/null || touch /etc/config/wrtweb
+
+# Auto-select the fastest package mirror (TUNA/USTC/official) once network is up.
+( sleep 25; /usr/libexec/wrtweb/mirror.sh auto >/dev/null 2>&1 ) &
+
 exit 0
