@@ -182,23 +182,71 @@ function R.overview()
   }
 end
 
--- clients list from dhcp leases + arp + wifi stations
+-- clients list with connection method, band, signal and rates
 function R.clients()
-  local list = {}
-  local seen = {}
-  for line in sh("cat /tmp/dhcp.leases"):gmatch("[^\n]+") do
-    local exp, mac, ip, host = line:match("(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
-    if mac then
-      seen[mac] = true
-      list[#list+1] = { mac=mac, ip=ip, name=(host=="*" and "" or host), online=true, source="dhcp" }
+  local wifi = {}
+  local iface_band = {}
+  for ifn in sh("iw dev 2>/dev/null"):gmatch("Interface (%S+)") do
+    local info = sh("iw dev "..ifn.." info 2>/dev/null")
+    local ch = tonumber(info:match("channel%s+(%d+)")) or 0
+    iface_band[ifn] = (ch > 0 and ch <= 14 and "2.4g") or (ch >= 32 and "5g") or ""
+    local cur
+    for line in sh("iw dev "..ifn.." station dump 2>/dev/null"):gmatch("[^\n]+") do
+      local mac = line:match("Station (%x%x:[%x:]+)%s*%(on")
+      if mac then
+        cur = { mac=mac:lower(), iface=ifn }
+        wifi[cur.mac] = cur
+      elseif cur then
+        local s = line:match("signal:%s*(%-?%d+)")
+        if s then cur.signal = tonumber(s) end
+        local tx = line:match("tx bitrate:%s*([%d%.]+) MBit/s")
+        if tx then cur.tx = tonumber(tx) end
+        local rx = line:match("rx bitrate:%s*([%d%.]+) MBit/s")
+        if rx then cur.rx = tonumber(rx) end
+        local ct = line:match("connected time:%s*(%d+)")
+        if ct then cur.connected = tonumber(ct) end
+      end
     end
   end
-  for ifn in sh("iw dev"):gmatch("Interface (%S+)") do
-    for mac, sig in sh("iw dev "..ifn.." station dump"):gmatch("Station (%S+).-\n.-signal:%s*(%-?%d+)") do
-      local found
-      for _,c in ipairs(list) do if c.mac:lower()==mac:lower() then found=c end end
-      if not found then list[#list+1] = { mac=mac, ip="", name="", online=true, source="wifi" }
-      else found.online=true end
+
+  local list, bymac = {}, {}
+  local function add(mac, ip, name, online)
+    mac = mac:lower()
+    local c = bymac[mac]
+    if not c then
+      c = { mac=mac, ip=ip, name=name, online=online }
+      bymac[mac] = c; list[#list+1] = c
+    else
+      if ip ~= "" and (c.ip or "") == "" then c.ip = ip end
+      if name ~= "" and (c.name or "") == "" then c.name = name end
+      if online then c.online = true end
+    end
+    return c
+  end
+
+  for line in sh("cat /tmp/dhcp.leases 2>/dev/null"):gmatch("[^\n]+") do
+    local exp, mac, ip, host = line:match("(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+    if mac then add(mac, ip, (host == "*" and "" or host), true) end
+  end
+  for ip, dev, mac in sh("ip neigh 2>/dev/null"):gmatch("(%d+%.%d+%.%d+%.%d+)%s+dev%s+(%S+)%s+lladdr%s+(%x%x:[%x:]+)") do
+    if dev:match("^br%-") or dev:match("^phy") or dev:match("^wlan") or dev:match("^eth%d") == nil then
+      add(mac, ip, "", true)
+    end
+  end
+
+  for _, c in ipairs(list) do
+    local w = wifi[c.mac]
+    if w then
+      c.method = "wifi"; c.iface = w.iface; c.band = iface_band[w.iface] or ""
+      c.signal = w.signal; c.tx = w.tx; c.rx = w.rx; c.connected = w.connected; c.online = true
+    else
+      c.method = "wired"
+    end
+  end
+  for mac, w in pairs(wifi) do
+    if not bymac[mac] then
+      list[#list+1] = { mac=mac, ip="", name="", online=true, method="wifi",
+        iface=w.iface, band=iface_band[w.iface] or "", signal=w.signal, tx=w.tx, rx=w.rx, connected=w.connected }
     end
   end
   return { clients=list }

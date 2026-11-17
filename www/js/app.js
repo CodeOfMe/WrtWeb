@@ -418,15 +418,35 @@
 
   VIEWS.clients = async function () {
     const d = await apiGet("clients");
-    const rows = arr(d.clients).map(c => `<tr>
-      <td>${esc(c.name || "-")}</td><td>${esc(c.ip || "-")}</td>
-      <td class="small">${esc(c.mac || "")}</td>
-      <td>${c.online ? `<span class="tag on">${esc(t("online", "v"))}</span>` : `<span class="tag off">${esc(t("offline", "v"))}</span>`}</td>
-      <td>${esc(c.source || "")}</td></tr>`).join("");
+    const sigTag = (s) => {
+      if (s == null) return "-";
+      const cls = s >= -60 ? "on" : (s >= -75 ? "" : "off");
+      return `<span class="tag ${cls}">${s} dBm</span>`;
+    };
+    const rows = arr(d.clients).map(c => {
+      let conn;
+      if (c.method === "wifi") {
+        const band = c.band === "5g" ? t("band_5g", "v") : (c.band === "2.4g" ? t("band_2g", "v") : "");
+        conn = `<span class="tag">${esc(t("wifi", "v"))}${band ? " " + esc(band) : ""}</span>`;
+      } else {
+        conn = `<span class="tag">${esc(t("wired", "v"))}</span>`;
+      }
+      const rate = (c.tx != null || c.rx != null)
+        ? `${c.tx != null ? c.tx : "-"} / ${c.rx != null ? c.rx : "-"} Mbit/s` : "-";
+      return `<tr>
+        <td>${esc(c.name || "-")}</td>
+        <td>${esc(c.ip || "-")}</td>
+        <td class="small">${esc(c.mac || "")}</td>
+        <td>${conn}</td>
+        <td>${c.method === "wifi" ? sigTag(c.signal) : "-"}</td>
+        <td class="small">${esc(rate)}</td>
+        <td>${c.online ? `<span class="tag on">${esc(t("online", "v"))}</span>` : `<span class="tag off">${esc(t("offline", "v"))}</span>`}</td>
+      </tr>`;
+    }).join("");
     return wrap(`<div class="card"><h2>${esc(t("clients", "nav"))}</h2>
       <table><thead><tr><th>${esc(t("name"))}</th><th>IP</th><th>${esc(t("mac", "v"))}</th>
-      <th>${esc(t("status"))}</th><th>${esc(t("source", "v"))}</th></tr></thead><tbody>
-      ${rows || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <th>${esc(t("method", "v"))}</th><th>${esc(t("signal", "v"))}</th><th>${esc(t("rate", "v"))}</th><th>${esc(t("status"))}</th></tr></thead><tbody>
+      ${rows || `<tr><td colspan="7" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div></div>`);
   };
 
