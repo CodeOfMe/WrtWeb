@@ -73,6 +73,7 @@
     { group: "internet", items: [
       { key: "overview", ic: "◎" },
       { key: "internet", ic: "🌐" },
+      { key: "hotspot", ic: "📡" },
       { key: "wan", ic: "⇄" },
       { key: "multiwan", ic: "⇉" },
     ]},
@@ -241,6 +242,63 @@
       const r = await apiPost("repeater_join", { ssid, key, encryption });
       toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
     };
+  };
+
+  VIEWS.hotspot = async function () {
+    const [mod, wl] = await Promise.all([apiGet("modem"), apiGet("wireless")]);
+    const aps = arr(wl.ifaces);
+    const protos = ["dhcp", "qmi", "mbim", "ppp"];
+    const apCards = aps.map(i => `<div class="card">
+      <h2>${esc(i.ssid || i.name)} <span class="tag">${esc(i.device || "")}</span></h2>
+      <div class="row">
+        <div><label>${esc(t("ssid"))}</label><input data-hf="ssid" data-hsec="${esc(i.name)}" value="${esc(i.ssid || "")}"></div>
+        <div><label>${esc(t("password"))}</label><input data-hf="key" data-hsec="${esc(i.name)}" type="password" value="${esc(i.key || "")}"></div>
+      </div>
+      <div class="btn-row"><button data-hsave="${esc(i.name)}">${esc(t("save"))}</button></div>
+    </div>`).join("");
+    return wrap(`
+      <div class="card"><h2>${esc(t("modem_title", "v"))}</h2>
+        <div class="grid">
+          ${stat(t("detected", "v"), mod.detected || t("none"))}
+          ${stat(t("status"), mod.enabled === "1" ? t("enabled") : t("disabled"))}
+        </div>
+        <div class="row">
+          <div><label>${esc(t("protocol", "v"))}</label><select id="hf-proto">
+            ${protos.map(p => `<option ${mod.proto === p ? "selected" : ""} value="${p}">${p.toUpperCase()}</option>`).join("")}
+          </select></div>
+          <div><label>${esc(t("apn", "v"))}</label><input id="hf-apn" value="${esc(mod.apn || "")}"></div>
+        </div>
+        <div class="btn-row">
+          <button id="hf-on">${esc(t("enable_share", "v"))}</button>
+          <button class="ghost" id="hf-off">${esc(t("disabled"))}</button>
+        </div>
+        <p class="muted small">${esc(t("modem_note", "v"))}</p>
+      </div>
+      <div class="card"><h2>${esc(t("wifi_hotspot", "v"))}</h2>
+        <p class="muted small">${esc(t("tethering", "v"))} — LAN devices join this Wi-Fi and share the uplink.</p>
+      </div>
+      ${apCards || `<div class="card muted">${esc(t("no_wireless", "v"))}</div>`}
+    `);
+  };
+  VIEWS.hotspot.mount = function () {
+    const on = $("#hf-on"), off = $("#hf-off");
+    if (on) on.onclick = async () => {
+      const r = await apiPost("modem_set", { enabled: "1", proto: $("#hf-proto").value, apn: $("#hf-apn").value });
+      toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+    };
+    if (off) off.onclick = async () => {
+      const r = await apiPost("modem_set", { enabled: "0" });
+      toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+    };
+    document.querySelectorAll("[data-hsave]").forEach(b => {
+      b.onclick = async () => {
+        const sec = b.getAttribute("data-hsave");
+        const p = { iface: sec };
+        document.querySelectorAll(`[data-hsec="${sec}"]`).forEach(inp => p[inp.getAttribute("data-hf")] = inp.value);
+        const r = await apiPost("wireless_set", p);
+        toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+      };
+    });
   };
 
   VIEWS.wan = async function () {

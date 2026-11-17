@@ -5,6 +5,7 @@ window.I18N = {
               network:"Network", system:"System" },
     nav: {
       overview:"Overview", internet:"Internet", wan:"WAN", multiwan:"Multi-WAN",
+      hotspot:"Hotspot Sharing",
       clients:"Clients",
       vpn:"VPN Dashboard", wgclient:"WireGuard Client", wgserver:"WireGuard Server",
       ovpnclient:"OpenVPN Client", ovpnserver:"OpenVPN Server", tor:"Tor",
@@ -60,7 +61,10 @@ window.I18N = {
       clash_note:"Clash / Mihomo is a rule-based proxy core. Install the mihomo package and import a config to use it.",
       mirror_note:"Choose a package mirror. Auto picks the fastest of TUNA / USTC / official.",
       current_source:"Current source", select_source:"Select source",
-      auto:"Auto (fastest)", official:"Official"
+      auto:"Auto (fastest)", official:"Official",
+      modem_title:"USB Modem / Cellular Share", detected:"Detected device",
+      enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
+      wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
     }
   },
   zh: {
@@ -68,6 +72,7 @@ window.I18N = {
               network:"网络", system:"系统" },
     nav: {
       overview:"概览", internet:"互联网", wan:"WAN", multiwan:"多WAN",
+      hotspot:"热点分享",
       clients:"客户端",
       vpn:"VPN 面板", wgclient:"WireGuard 客户端", wgserver:"WireGuard 服务端",
       ovpnclient:"OpenVPN 客户端", ovpnserver:"OpenVPN 服务端", tor:"Tor",
@@ -123,7 +128,10 @@ window.I18N = {
       clash_note:"Clash / Mihomo 是基于规则的代理内核。安装 mihomo 软件包并导入配置后即可使用。",
       mirror_note:"选择软件源。自动模式会在 TUNA / USTC / 官方中选择最快的一个。",
       current_source:"当前软件源", select_source:"选择软件源",
-      auto:"自动（最快）", official:"官方"
+      auto:"自动（最快）", official:"官方",
+      modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
+      enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
+      wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"
     }
   }
 };
