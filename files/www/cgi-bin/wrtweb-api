@@ -115,23 +115,70 @@ local R = {}
 
 -- status / overview
 function R.overview()
-  local board = {}
-  local m = trim(sh("cat /tmp/sysinfo/model"))
+  local model = trim(sh("cat /tmp/sysinfo/model"))
   local fw = trim(sh("grep DISTRIB_DESCRIPTION /etc/openwrt_release | cut -d= -f2 | tr -d \"'\""))
+  local kernel = trim(sh("uname -r"))
+  local host = trim(sh("cat /proc/sys/kernel/hostname"))
+  local localtime = trim(sh("date '+%Y-%m-%d %H:%M:%S %Z'"))
   local up = tonumber(trim(sh("cut -d. -f1 /proc/uptime"))) or 0
-  local mem = {}
-  for k,v in sh("cat /proc/meminfo"):gmatch("(%w+):%s*(%d+)") do mem[k]=tonumber(v) end
-  local wan = trim(sh("ubus call network.interface.wan status | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
-  local proto = trim(sh("uci -q get network.wan.proto"))
-  local clients = 0
-  for _ in sh("cat /tmp/dhcp.leases"):gmatch("[^\n]+") do clients = clients + 1 end
-  local nvme = trim(sh("df -h /mnt/nvme 2>/dev/null | awk 'NR==2{print $2\" \"$4}'"))
+  local load = trim(sh("cut -d' ' -f1-3 /proc/loadavg"))
+  -- memory (KiB)
+  local mi = {}
+  for k,v in sh("cat /proc/meminfo"):gmatch("([%w_]+):%s*(%d+)") do mi[k]=tonumber(v) end
+  local mt = mi.MemTotal or 0
+  local mfree = mi.MemFree or 0
+  local mavail = mi.MemAvailable or 0
+  local mbuf = mi.Buffers or 0
+  local mcache = mi.Cached or 0
+  -- storage (KiB)
+  local storage = {}
+  for line in sh("df -k 2>/dev/null"):gmatch("[^\n]+") do
+    local fs,size,used,avail,pct,mnt = line:match("^(%S+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%%%s+(.+)$")
+    if fs and (mnt == "/" or mnt == "/overlay" or mnt == "/tmp" or mnt:match("^/mnt")) then
+      storage[#storage+1] = { fs=fs, total=tonumber(size), used=tonumber(used), avail=tonumber(avail), pct=tonumber(pct), target=mnt }
+    end
+  end
+  -- network (WAN)
+  local function jf(q) return trim(sh("ubus call network.interface.wan status 2>/dev/null | jsonfilter -e "..shq(q))) end
+  local wan4 = jf('@["ipv4-address"][0].address')
+  local wan6 = jf('@["ipv6-address"][0].address')
+  local wanproto = jf('@.proto')
+  if wanproto == "" then wanproto = trim(sh("uci -q get network.wan.proto")) end
+  local wandev = jf('@.device'); if wandev == "" then wandev = "eth0" end
+  local wanmac = trim(sh("cat /sys/class/net/"..wandev.."/address 2>/dev/null"))
+  local wanup = tonumber(jf('@.uptime')) or 0
+  local wanrx = tonumber(jf('@.statistics.rx_bytes')) or 0
+  local wantx = tonumber(jf('@.statistics.tx_bytes')) or 0
+  local wandns = jf('@["dns-server"][0]')
+  -- dhcp leases
+  local leases = {}
+  for line in sh("cat /tmp/dhcp.leases 2>/dev/null"):gmatch("[^\n]+") do
+    local exp,mac,ip,hn = line:match("^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+    if mac then leases[#leases+1] = { expires=tonumber(exp), mac=mac, ip=ip, host=(hn == "*" and "" or hn) } end
+  end
+  -- wireless APs + station count
+  local wl = {}
+  local i = 0
+  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+    wl[#wl+1] = { ssid=uci_get("wireless",sec,"ssid"), radio=uci_get("wireless",sec,"device") }
+    i = i + 1; if i > 8 then break end
+  end
+  local stations = 0
+  for ifn in sh("iw dev 2>/dev/null"):gmatch("Interface (%S+)") do
+    stations = stations + (tonumber(trim(sh("iw dev "..ifn.." station dump 2>/dev/null | grep -c Station"))) or 0)
+  end
+  local log = sh("logread -l 25 2>/dev/null")
   return {
-    model=m, firmware=fw, uptime=up, load=trim(sh("cut -d' ' -f1-3 /proc/loadavg")),
-    memtotal=mem.MemTotal and math.floor(mem.MemTotal/1024) or 0,
-    memfree=mem.MemAvailable and math.floor(mem.MemAvailable/1024) or 0,
-    wan_ip=wan, wan_proto=proto, clients=clients, storage=nvme,
-    hostname=trim(sh("cat /proc/sys/kernel/hostname"))
+    model=model, firmware=fw, kernel=kernel, hostname=host, localtime=localtime,
+    uptime=up, load=load,
+    mem_total=mt, mem_free=mfree, mem_avail=mavail, mem_buffers=mbuf, mem_cached=mcache,
+    mem_used=(mt-mavail), mem_pct=(mt>0 and math.floor((mt-mavail)*100/mt) or 0),
+    storage=storage,
+    wan_ip=wan4, wan_ip6=wan6, wan_proto=wanproto, wan_mac=wanmac,
+    wan_uptime=wanup, wan_rx=wanrx, wan_tx=wantx, wan_dns=wandns,
+    clients=#leases, leases=leases, wireless=wl, stations=stations, log=log,
+    -- legacy compact fields
+    memtotal=math.floor(mt/1024), memfree=math.floor(mavail/1024),
   }
 end
 
@@ -794,8 +841,8 @@ function R.storage_migrate()
   local uuid = nv_uuid()
   if uuid == "" then return { ok=false, error="cannot read NVMe UUID" } end
   if fstab_find("/overlay") then return { ok=false, error="extroot already configured" } end
-  -- preserve a large binary (opencode) into the overlay so it survives the move
-  sh("[ -f /mnt/nvme/opencode/opencode ] && mkdir -p /overlay/opt/opencode && cp /mnt/nvme/opencode/opencode /overlay/opt/opencode/opencode && ln -sf /opt/opencode/opencode /usr/bin/opencode")
+  -- repoint opencode symlink into the migrated overlay (binary stays on NVMe at /opencode)
+  sh("mkdir -p /overlay/usr/bin 2>/dev/null; ln -sf /opencode/opencode /overlay/usr/bin/opencode 2>/dev/null")
   -- copy current overlay -> nvme
   sh("mkdir -p /tmp/extroot")
   sh("mount "..NVDEV.." /tmp/extroot 2>/dev/null")

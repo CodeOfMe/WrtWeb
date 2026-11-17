@@ -190,24 +190,85 @@
   /* ---------------- views ---------------- */
   const VIEWS = {};
 
+  function human(bytes) {
+    bytes = Math.max(0, Number(bytes) || 0);
+    const u = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let i = 0, v = bytes;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return (v >= 100 ? Math.round(v) : v.toFixed(1)) + " " + u[i];
+  }
+  const kib = (kb) => human((Number(kb) || 0) * 1024);
+
   VIEWS.overview = async function () {
     const d = await apiGet("overview");
     const up = d.uptime || 0;
     const uh = Math.floor(up / 3600), um = Math.floor((up % 3600) / 60);
+    const diskRows = arr(d.storage).map(s => `<tr>
+      <td>${esc(s.target)}</td><td>${esc(s.fs)}</td>
+      <td>${kib(s.total)}</td><td>${kib(s.used)}</td><td>${kib(s.avail)}</td>
+      <td>${esc(s.pct)}%</td></tr>`).join("");
+    const leaseRows = arr(d.leases).map(l => `<tr>
+      <td>${esc(l.host || "-")}</td><td>${esc(l.ip)}</td><td class="small">${esc(l.mac)}</td></tr>`).join("");
+    const aps = arr(d.wireless).map(w => `<span class="tag">${esc(w.ssid || "-")} · ${esc(w.radio || "")}</span>`).join(" ");
     return wrap(`
-      <div class="card"><h2>${esc(t("status"))}</h2>
+      <div class="card"><h2>${esc(t("sysinfo", "nav"))}</h2>
         <div class="grid">
           ${stat(t("model"), d.model, false, "sysinfo")}
-          ${stat(t("firmware"), d.firmware, true, "upgrade")}
           ${stat(t("hostname"), d.hostname, false, "timezone")}
+          ${stat(t("firmware"), d.firmware, true, "upgrade")}
+          ${stat(t("kernel", "v"), d.kernel, true)}
+          ${stat(t("localtime", "v"), d.localtime, true)}
           ${stat(t("uptime"), uh + "h " + um + "m", false, "sysinfo")}
           ${stat(t("load"), d.load, false, "sysinfo")}
-          ${stat(t("memory"), (d.memfree || 0) + " / " + (d.memtotal || 0) + " MB", false, "sysinfo")}
-          ${stat(t("wan_ip"), d.wan_ip || "-", false, "wan")}
-          ${stat(t("clients", "nav"), d.clients, false, "clients")}
-          ${stat(t("storage"), d.storage || "-", false, "nas")}
         </div>
-        <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/status/overview")}</div>
+      </div>
+
+      <div class="card"><h2>${esc(t("memory"))}</h2>
+        <div class="grid">
+          ${stat(t("used", "v"), kib(d.mem_used) + " / " + kib(d.mem_total) + " (" + (d.mem_pct || 0) + "%)")}
+          ${stat(t("available", "v"), kib(d.mem_avail))}
+          ${stat(t("free", "v"), kib(d.mem_free))}
+          ${stat(t("buffers", "v"), kib(d.mem_buffers))}
+          ${stat(t("cached", "v"), kib(d.mem_cached))}
+        </div>
+      </div>
+
+      <div class="card"><h2>${esc(t("storage_usage", "v"))}</h2>
+        <table><thead><tr><th>${esc(t("target", "v"))}</th><th>${esc(t("filesystem", "v"))}</th>
+        <th>${esc(t("total", "v"))}</th><th>${esc(t("used", "v"))}</th><th>${esc(t("available", "v"))}</th><th>%</th></tr></thead>
+        <tbody>${diskRows || `<tr><td colspan="6" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+        <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/storage">${esc(t("storage", "nav"))} ›</a></div>
+      </div>
+
+      <div class="card"><h2>${esc(t("network_wan", "v"))}</h2>
+        <div class="grid">
+          ${stat(t("wan_ip"), d.wan_ip || "-", false, "wan")}
+          ${stat("IPv6", d.wan_ip6 || "-", true, "wan")}
+          ${stat(t("protocol", "v"), d.wan_proto || "-")}
+          ${stat(t("mac", "v"), d.wan_mac || "-", true)}
+          ${stat(t("uptime"), Math.floor((d.wan_uptime || 0) / 60) + "m")}
+          ${stat("RX", human(d.wan_rx))}
+          ${stat("TX", human(d.wan_tx))}
+          ${stat("DNS", d.wan_dns || "-", true)}
+          ${stat(t("clients", "nav"), d.clients, false, "clients")}
+        </div>
+        <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/wan">${esc(t("wan", "nav"))} ›</a></div>
+      </div>
+
+      <div class="card"><h2>${esc(t("dhcp_leases", "v"))} (${arr(d.leases).length})</h2>
+        <table><thead><tr><th>${esc(t("hostname"))}</th><th>IP</th><th>${esc(t("mac", "v"))}</th></tr></thead>
+        <tbody>${leaseRows || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+        <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/clients">${esc(t("clients", "nav"))} ›</a></div>
+      </div>
+
+      <div class="card"><h2>${esc(t("wireless_aps", "v"))} · ${esc(t("stations", "v"))}: ${d.stations || 0}</h2>
+        <p>${aps || `<span class="muted">${esc(t("none"))}</span>`}</p>
+        <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/wireless">${esc(t("wireless", "nav"))} ›</a></div>
+      </div>
+
+      <div class="card"><h2>${esc(t("system_log", "v"))}</h2>
+        <pre class="log">${esc(d.log || "")}</pre>
+        <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/logs">${esc(t("logs", "nav"))} ›</a></div>
       </div>`);
   };
 

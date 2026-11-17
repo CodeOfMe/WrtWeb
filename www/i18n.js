@@ -78,6 +78,10 @@ window.I18N = {
       migrate_btn:"Migrate to NVMe", rollback_btn:"Roll back to internal",
       migrate_confirm:"This copies the system to the NVMe and reboots the router. Continue?",
       storage_warn:"Needs an ext4 NVMe partition; reboots the device. If the NVMe fails, the router falls back to internal flash.",
+      kernel:"Kernel", localtime:"Local time", used:"Used", available:"Available", free:"Free",
+      buffers:"Buffers", cached:"Cached", total:"Total", filesystem:"Filesystem", target:"Mount",
+      storage_usage:"Storage usage", network_wan:"Network (WAN)", dhcp_leases:"DHCP Leases",
+      wireless_aps:"Wireless", stations:"Stations", system_log:"System Log",
       modem_title:"USB Modem / Cellular Share", detected:"Detected device",
       enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
       wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
@@ -161,6 +165,10 @@ window.I18N = {
       migrate_btn:"迁移到 NVMe", rollback_btn:"回滚到内部闪存",
       migrate_confirm:"将把系统复制到 NVMe 并重启路由器，继续吗？",
       storage_warn:"需要 ext4 格式的 NVMe 分区；会重启设备。若 NVMe 故障，路由器会回退到内部闪存。",
+      kernel:"内核", localtime:"本地时间", used:"已用", available:"可用", free:"空闲",
+      buffers:"缓冲", cached:"缓存", total:"总量", filesystem:"文件系统", target:"挂载点",
+      storage_usage:"存储使用", network_wan:"网络 (WAN)", dhcp_leases:"DHCP 租约",
+      wireless_aps:"无线", stations:"接入终端", system_log:"系统日志",
       modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
       enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
       wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"
