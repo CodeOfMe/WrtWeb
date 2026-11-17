@@ -71,6 +71,7 @@ window.I18N = {
       storage_path:"Storage path", assign:"Assign",
       remote_note:"Allow hosts on the WAN side to open WrtWeb using the router's WAN IP address.",
       remote_url:"Access URL",
+      ssh_wan:"SSH (WAN)", ssh_note:"Allow SSH login from the WAN side, e.g. ssh root@<WAN IP>.",
       modem_title:"USB Modem / Cellular Share", detected:"Detected device",
       enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
       wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
@@ -147,6 +148,7 @@ window.I18N = {
       storage_path:"存储位置", assign:"分配",
       remote_note:"允许 WAN 侧主机通过路由器 WAN 地址打开 WrtWeb。",
       remote_url:"访问地址",
+      ssh_wan:"SSH (WAN)", ssh_note:"允许 WAN 侧主机通过 SSH 登录，例如 ssh root@<WAN 地址>。",
       modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
       enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
       wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"

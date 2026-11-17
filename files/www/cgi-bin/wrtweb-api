@@ -722,6 +722,40 @@ function R.remote_access_set()
   return { ok=true }
 end
 
+-- SSH access from the WAN side
+local SSH_RULE = "Allow-SSH-WAN"
+local function find_fw_rule(name)
+  for sec, nm in sh("uci show firewall 2>/dev/null"):gmatch("firewall%.([^%.]+)%.name='([^']*)'") do
+    if nm == name then return sec end
+  end
+  return nil
+end
+
+function R.remote_ssh()
+  local sec = find_fw_rule(SSH_RULE)
+  local wanip = trim(sh("ubus call network.interface.wan status | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+  return { enabled = (sec ~= nil), wan_ip = wanip, port = 22 }
+end
+
+function R.remote_ssh_set()
+  local sec = find_fw_rule(SSH_RULE)
+  if qs.enabled == "1" then
+    if not sec then
+      sh("uci add firewall rule")
+      uci_set("firewall.@rule[-1].name", SSH_RULE)
+      uci_set("firewall.@rule[-1].src", "wan")
+      uci_set("firewall.@rule[-1].proto", "tcp")
+      uci_set("firewall.@rule[-1].dest_port", "22")
+      uci_set("firewall.@rule[-1].target", "ACCEPT")
+      uci_commit("firewall")
+    end
+  else
+    if sec then sh("uci delete firewall."..sec); uci_commit("firewall") end
+  end
+  sh("/etc/init.d/firewall reload >/dev/null 2>&1")
+  return { ok=true }
+end
+
 -- System: language / timezone / upgrade / backup / reboot / logs
 function R.system()
   return {

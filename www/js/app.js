@@ -576,25 +576,39 @@
   VIEWS.clash.mount = bindSvc;
 
   VIEWS.remote = async function () {
-    const d = await apiGet("remote_access");
+    const [d, s] = await Promise.all([apiGet("remote_access"), apiGet("remote_ssh")]);
     const url = "https://" + (d.wan_ip || location.hostname) + "/wrtweb/";
-    return wrap(`<div class="card"><h2>${esc(t("remote", "nav"))}</h2>
-      <p class="muted small">${esc(t("remote_note", "v"))}</p>
-      <div class="grid">
-        ${stat(t("status"), d.enabled ? t("enabled") : t("disabled"))}
-        ${stat("WAN", d.wan_ip || "-")}
+    const sshcmd = "ssh root@" + (s.wan_ip || location.hostname);
+    return wrap(`
+      <div class="card"><h2>${esc(t("remote", "nav"))}</h2>
+        <p class="muted small">${esc(t("remote_note", "v"))}</p>
+        <div class="grid">
+          ${stat(t("status"), d.enabled ? t("enabled") : t("disabled"))}
+          ${stat("WAN", d.wan_ip || "-")}
+        </div>
+        <div class="row"><div><label>${esc(t("remote_url", "v"))}</label><input readonly value="${esc(url)}"></div></div>
+        <div class="btn-row">
+          <button id="ra-on">${esc(t("enabled"))}</button>
+          <button class="ghost" id="ra-off">${esc(t("disabled"))}</button>
+          ${cfgBtn("/cgi-bin/luci/admin/network/firewall")}
+        </div>
       </div>
-      <div class="row"><div><label>${esc(t("remote_url", "v"))}</label><input readonly value="${esc(url)}"></div></div>
-      <div class="btn-row">
-        <button id="ra-on">${esc(t("enabled"))}</button>
-        <button class="ghost" id="ra-off">${esc(t("disabled"))}</button>
-        ${cfgBtn("/cgi-bin/luci/admin/network/firewall")}
-      </div>
-    </div>`);
+      <div class="card"><h2>${esc(t("ssh_wan", "v"))}</h2>
+        <p class="muted small">${esc(t("ssh_note", "v"))}</p>
+        <div class="grid">${stat(t("status"), s.enabled ? t("enabled") : t("disabled"))}</div>
+        <div class="row"><div><label>${esc(t("remote_url", "v"))}</label><input readonly value="${esc(sshcmd)}"></div></div>
+        <div class="btn-row">
+          <button id="ssh-on">${esc(t("enabled"))}</button>
+          <button class="ghost" id="ssh-off">${esc(t("disabled"))}</button>
+        </div>
+      </div>`);
   };
   VIEWS.remote.mount = function () {
     $("#ra-on").onclick = async () => { const r = await apiPost("remote_access_set", { enabled: "1" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
     $("#ra-off").onclick = async () => { const r = await apiPost("remote_access_set", { enabled: "0" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+    const so = $("#ssh-on"), sf = $("#ssh-off");
+    if (so) so.onclick = async () => { const r = await apiPost("remote_ssh_set", { enabled: "1" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+    if (sf) sf.onclick = async () => { const r = await apiPost("remote_ssh_set", { enabled: "0" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
   };
 
   VIEWS.mirror = async function () {
