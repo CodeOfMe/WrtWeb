@@ -17,6 +17,7 @@ window.I18N = {
       ipv6:"IPv6", firewall:"Firewall", ports:"Port Forwarding", vlan:"VLAN",
       sysinfo:"System Status", timezone:"Timezone", logs:"Logs", upgrade:"Upgrade",
       mirror:"Software Source",
+      storage:"Storage Migration",
       remote:"Remote Access",
       advanced:"Advanced", security:"Security", backup:"Backup / Restore", reboot:"Reboot",
       sms:"SMS"
@@ -72,6 +73,11 @@ window.I18N = {
       remote_note:"Allow hosts on the WAN side to open WrtWeb using the router's WAN IP address.",
       remote_url:"Access URL",
       ssh_wan:"SSH (WAN)", ssh_note:"Allow SSH login from the WAN side, e.g. ssh root@<WAN IP>.",
+      storage_note:"Move the writable overlay to the NVMe so the whole system runs from the SSD (OpenWrt extroot).",
+      overlay_now:"Current overlay", nvme_part:"NVMe", extroot_on:"Migrated to NVMe", extroot_off:"Internal flash",
+      migrate_btn:"Migrate to NVMe", rollback_btn:"Roll back to internal",
+      migrate_confirm:"This copies the system to the NVMe and reboots the router. Continue?",
+      storage_warn:"Needs an ext4 NVMe partition; reboots the device. If the NVMe fails, the router falls back to internal flash.",
       modem_title:"USB Modem / Cellular Share", detected:"Detected device",
       enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
       wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
@@ -94,6 +100,7 @@ window.I18N = {
       ipv6:"IPv6", firewall:"防火墙", ports:"端口转发", vlan:"VLAN",
       sysinfo:"系统状态", timezone:"时区", logs:"日志", upgrade:"升级",
       mirror:"软件源",
+      storage:"存储迁移",
       remote:"远程访问",
       advanced:"高级", security:"安全", backup:"备份/恢复", reboot:"重启",
       sms:"短信"
@@ -149,6 +156,11 @@ window.I18N = {
       remote_note:"允许 WAN 侧主机通过路由器 WAN 地址打开 WrtWeb。",
       remote_url:"访问地址",
       ssh_wan:"SSH (WAN)", ssh_note:"允许 WAN 侧主机通过 SSH 登录，例如 ssh root@<WAN 地址>。",
+      storage_note:"将可写 overlay 迁移到 NVMe，使整个系统运行在 SSD 上（OpenWrt extroot）。",
+      overlay_now:"当前 overlay", nvme_part:"NVMe", extroot_on:"已迁移到 NVMe", extroot_off:"内部闪存",
+      migrate_btn:"迁移到 NVMe", rollback_btn:"回滚到内部闪存",
+      migrate_confirm:"将把系统复制到 NVMe 并重启路由器，继续吗？",
+      storage_warn:"需要 ext4 格式的 NVMe 分区；会重启设备。若 NVMe 故障，路由器会回退到内部闪存。",
       modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
       enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
       wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"

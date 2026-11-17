@@ -756,6 +756,89 @@ function R.remote_ssh_set()
   return { ok=true }
 end
 
+-- Storage migration: move the writable overlay onto the NVMe (OpenWrt extroot)
+local NVDEV = "/dev/nvme0n1p1"
+
+local function nv_uuid() return trim(sh("blkid -s UUID -o value "..NVDEV.." 2>/dev/null")) end
+local function nv_fstype() return trim(sh("blkid -s TYPE -o value "..NVDEV.." 2>/dev/null")) end
+local function fstab_find(target)
+  local i = 0
+  while i <= 32 do
+    local t = uci_get("fstab", "@mount["..i.."]", "target")
+    if t == "" then return nil end
+    if t == target then return i end
+    i = i + 1
+  end
+  return nil
+end
+
+function R.storage()
+  local overlay = trim(sh("df -h /overlay 2>/dev/null | awk 'NR==2{print $2\" / \"$4\" free\"}'"))
+  local nvme = trim(sh("df -h /mnt/nvme 2>/dev/null | awk 'NR==2{print $2\" / \"$4\" free\"}'"))
+  local dev_ok = trim(sh("test -b "..NVDEV.." && echo y")) == "y"
+  local rootdev = trim(sh("df /overlay 2>/dev/null | awk 'NR==2{print $1}'"))
+  return {
+    overlay = overlay, nvme = nvme, dev_ok = dev_ok,
+    uuid = dev_ok and nv_uuid() or "",
+    fstype = dev_ok and nv_fstype() or "",
+    extroot = (rootdev:find("nvme") ~= nil),
+    rootdev = rootdev,
+  }
+end
+
+function R.storage_migrate()
+  if qs.confirm ~= "1" then return { ok=false, error="confirmation required" } end
+  if trim(sh("test -b "..NVDEV.." && echo y")) ~= "y" then return { ok=false, error="NVMe not found" } end
+  local fs = nv_fstype()
+  if fs ~= "ext4" then return { ok=false, error="NVMe partition must be ext4 (found: "..(fs=="" and "none" or fs)..")" } end
+  local uuid = nv_uuid()
+  if uuid == "" then return { ok=false, error="cannot read NVMe UUID" } end
+  if fstab_find("/overlay") then return { ok=false, error="extroot already configured" } end
+  -- preserve a large binary (opencode) into the overlay so it survives the move
+  sh("[ -f /mnt/nvme/opencode/opencode ] && mkdir -p /overlay/opt/opencode && cp /mnt/nvme/opencode/opencode /overlay/opt/opencode/opencode && ln -sf /opt/opencode/opencode /usr/bin/opencode")
+  -- copy current overlay -> nvme
+  sh("mkdir -p /tmp/extroot")
+  sh("mount "..NVDEV.." /tmp/extroot 2>/dev/null")
+  local rc = trim(sh("tar -C /overlay -cf - . 2>/dev/null | tar -C /tmp/extroot -xf - 2>/tmp/extroot.err; echo $?"))
+  sh("sync")
+  sh("umount /tmp/extroot 2>/dev/null")
+  if rc ~= "0" then
+    return { ok=false, error="copy failed (rc="..rc..")", detail=sh("tail -3 /tmp/extroot.err 2>/dev/null") }
+  end
+  -- fstab: remove old data mount(s) targeting /mnt/nvme, add /overlay extroot
+  local mi = fstab_find("/mnt/nvme")
+  while mi do
+    sh("uci delete fstab.@mount["..mi.."]")
+    mi = fstab_find("/mnt/nvme")
+  end
+  sh("uci -q delete fstab.nvme")
+  sh("uci add fstab mount")
+  uci_set("fstab.@mount[-1].target", "/overlay")
+  uci_set("fstab.@mount[-1].uuid", uuid)
+  uci_set("fstab.@mount[-1].fstype", "ext4")
+  uci_set("fstab.@mount[-1].enabled", "1")
+  uci_commit("fstab")
+  sh("(sleep 3; reboot) >/dev/null 2>&1 &")
+  return { ok=true, reboot=true, uuid=uuid }
+end
+
+function R.storage_rollback()
+  local mi = fstab_find("/overlay")
+  if mi then sh("uci delete fstab.@mount["..mi.."]") end
+  local uuid = nv_uuid()
+  if uuid ~= "" then
+    sh("uci -q delete fstab.nvme")
+    sh("uci add fstab mount")
+    uci_set("fstab.@mount[-1].target", "/mnt/nvme")
+    uci_set("fstab.@mount[-1].uuid", uuid)
+    uci_set("fstab.@mount[-1].fstype", "ext4")
+    uci_set("fstab.@mount[-1].enabled", "1")
+  end
+  uci_commit("fstab")
+  sh("(sleep 3; reboot) >/dev/null 2>&1 &")
+  return { ok=true, reboot=true }
+end
+
 -- System: language / timezone / upgrade / backup / reboot / logs
 function R.system()
   return {

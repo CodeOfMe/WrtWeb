@@ -128,6 +128,7 @@
       { key: "logs", ic: "📜" },
       { key: "mirror", ic: "⇅" },
       { key: "remote", ic: "🛰" },
+      { key: "storage", ic: "🖴" },
       { key: "upgrade", ic: "⤒" },
       { key: "advanced", ic: "⚙" },
       { key: "security", ic: "🔑" },
@@ -626,6 +627,39 @@
     const so = $("#ssh-on"), sf = $("#ssh-off");
     if (so) so.onclick = async () => { const r = await apiPost("remote_ssh_set", { enabled: "1" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
     if (sf) sf.onclick = async () => { const r = await apiPost("remote_ssh_set", { enabled: "0" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+  };
+
+  VIEWS.storage = async function () {
+    const d = await apiGet("storage");
+    return wrap(`
+      <div class="card"><h2>${esc(t("storage", "nav"))}</h2>
+        <p class="muted small">${esc(t("storage_note", "v"))}</p>
+        <div class="grid">
+          ${stat(t("overlay_now", "v"), d.overlay || "-", true)}
+          ${stat(t("nvme_part", "v"), (d.fstype || "?") + " " + (d.uuid || ""), true)}
+          ${stat(t("status"), d.extroot ? t("extroot_on", "v") : t("extroot_off", "v"))}
+        </div>
+        <div class="btn-row">
+          ${d.extroot
+            ? `<button class="danger" id="st-rollback">${esc(t("rollback_btn", "v"))}</button>`
+            : `<button id="st-migrate">${esc(t("migrate_btn", "v"))}</button>`}
+        </div>
+        <p class="muted small">${esc(t("storage_warn", "v"))}</p>
+      </div>`);
+  };
+  VIEWS.storage.mount = function () {
+    const m = $("#st-migrate");
+    if (m) m.onclick = async () => {
+      if (!confirm(t("migrate_confirm", "v"))) return;
+      const r = await apiPost("storage_migrate", { confirm: "1" });
+      if (r.ok) toast(t("reboot_now", "v")); else toast(r.error || t("failed", "v"), "err");
+    };
+    const rb = $("#st-rollback");
+    if (rb) rb.onclick = async () => {
+      if (!confirm(t("migrate_confirm", "v"))) return;
+      const r = await apiPost("storage_rollback", {});
+      if (r.ok) toast(t("reboot_now", "v")); else toast(r.error || t("failed", "v"), "err");
+    };
   };
 
   VIEWS.mirror = async function () {
