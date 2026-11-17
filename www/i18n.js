@@ -28,6 +28,7 @@ window.I18N = {
       installed:"Installed", not_installed:"Not installed", running:"Running",
       stopped:"Stopped", saved:"Saved", failed:"Failed", confirm:"Confirm",
       reboot_confirm:"Reboot the router now?", language:"Language", model:"Model",
+      restart:"Restart",
       firmware:"Firmware", uptime:"Uptime", load:"Load", memory:"Memory",
       clients:"Clients", wan_ip:"WAN IP", storage:"Storage", hostname:"Hostname"
     },
@@ -58,7 +59,7 @@ window.I18N = {
       scanning:"Scanning…", reboot_now:"Rebooting…", ssid_required:"SSID required",
       connected_to:"Connected to", started:"Started", stopped:"Stopped", failed:"Failed",
       language:"Language",
-      clash_note:"Clash / Mihomo is a rule-based proxy core. Install the mihomo package and import a config to use it.",
+      clash_note:"Clash / Mihomo rule-based proxy. Put your config at /etc/mihomo/config.yaml, then start the service.",
       mirror_note:"Choose a package mirror. Auto picks the fastest of TUNA / USTC / official.",
       current_source:"Current source", select_source:"Select source",
       auto:"Auto (fastest)", official:"Official",
@@ -95,6 +96,7 @@ window.I18N = {
       installed:"已安装", not_installed:"未安装", running:"运行中",
       stopped:"已停止", saved:"已保存", failed:"失败", confirm:"确认",
       reboot_confirm:"现在重启路由器吗？", language:"语言", model:"型号",
+      restart:"重启服务",
       firmware:"固件", uptime:"运行时间", load:"负载", memory:"内存",
       clients:"客户端数", wan_ip:"WAN 地址", storage:"存储", hostname:"主机名"
     },
@@ -125,7 +127,7 @@ window.I18N = {
       scanning:"扫描中…", reboot_now:"正在重启…", ssid_required:"请填写 SSID",
       connected_to:"已连接", started:"已启动", stopped:"已停止", failed:"失败",
       language:"语言",
-      clash_note:"Clash / Mihomo 是基于规则的代理内核。安装 mihomo 软件包并导入配置后即可使用。",
+      clash_note:"Clash / Mihomo 基于规则的代理内核。将配置放到 /etc/mihomo/config.yaml 后启动服务即可。",
       mirror_note:"选择软件源。自动模式会在 TUNA / USTC / 官方中选择最快的一个。",
       current_source:"当前软件源", select_source:"选择软件源",
       auto:"自动（最快）", official:"官方",

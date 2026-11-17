@@ -468,6 +468,111 @@ function R.mirror_set()
   return { ok = (out:match("^OK") ~= nil), output = out, mode = mode }
 end
 
+-- Service status + control for feature daemons
+local SERVICES = {
+  tor       = { proc="tor",          svc="tor",          check="command -v tor" },
+  tailscale = { proc="tailscaled",   svc="tailscale",    check="command -v tailscale" },
+  zerotier  = { proc="zerotier-one", svc="zerotier",     check="command -v zerotier-cli" },
+  mwan3     = { proc="",             svc="mwan3",        check="command -v mwan3" },
+  openvpn   = { proc="openvpn",      svc="openvpn",      check="command -v openvpn" },
+  wireguard = { proc="",             svc="",             check="command -v wg" },
+  adguard   = { proc="AdGuardHome",  svc="adguardhome",  check="command -v AdGuardHome" },
+  samba     = { proc="smbd",         svc="samba4",       check="command -v smbd" },
+  mihomo    = { proc="mihomo",       svc="mihomo",       check="command -v mihomo" },
+}
+
+function R.service()
+  local k = qs.s or ""
+  local d = SERVICES[k] or {}
+  local installed = d.check and trim(sh(d.check)) ~= "" or false
+  local running = d.proc and d.proc ~= "" and trim(sh("pidof "..d.proc)) ~= "" or false
+  return { key=k, installed=installed, running=running }
+end
+
+function R.service_set()
+  local k = qs.s or ""
+  local act = qs.action or "status"
+  local d = SERVICES[k] or {}
+  if not d.svc or d.svc == "" then return { ok=false, error="no service" } end
+  if act == "start" then
+    sh("/etc/init.d/"..d.svc.." start 2>/dev/null; /etc/init.d/"..d.svc.." enable 2>/dev/null")
+  elseif act == "stop" then
+    sh("/etc/init.d/"..d.svc.." stop 2>/dev/null")
+  elseif act == "restart" then
+    sh("/etc/init.d/"..d.svc.." restart 2>/dev/null")
+  end
+  return { ok=true }
+end
+
+-- Multi-WAN (mwan3) status
+function R.mwan()
+  return {
+    installed = trim(sh("command -v mwan3")) ~= "",
+    running = trim(sh("pgrep -f mwan3")) ~= "",
+    status = sh("mwan3 status 2>/dev/null | head -40"),
+    interfaces = sh("mwan3 interfaces 2>/dev/null"),
+  }
+end
+
+-- Tailscale status
+function R.tailscale()
+  return {
+    installed = trim(sh("command -v tailscale")) ~= "",
+    backend = trim(sh("tailscale status --json 2>/dev/null | jsonfilter -e '@.BackendState'")),
+    ip = trim(sh("tailscale ip -4 2>/dev/null")),
+    status = sh("tailscale status 2>/dev/null | head -20"),
+  }
+end
+
+function R.tailscale_set()
+  local act = qs.action or "status"
+  if act == "up" then sh("(tailscale up --accept-routes >/dev/null 2>&1 &)")
+  elseif act == "down" then sh("tailscale down 2>/dev/null") end
+  return { ok=true }
+end
+
+-- ZeroTier status / join
+function R.zerotier()
+  return {
+    installed = trim(sh("command -v zerotier-cli")) ~= "",
+    info = sh("zerotier-cli info 2>/dev/null"),
+    networks = sh("zerotier-cli listnetworks 2>/dev/null"),
+  }
+end
+
+function R.zerotier_set()
+  local act = qs.action or ""
+  local nw = qs.nwid or ""
+  if not nw:match("^%x+$") then return { ok=false } end
+  if act == "join" then sh("zerotier-cli join "..nw.." 2>/dev/null")
+  elseif act == "leave" then sh("zerotier-cli leave "..nw.." 2>/dev/null") end
+  return { ok=true }
+end
+
+-- DNS upstream config
+function R.dns()
+  return {
+    servers = sh("uci -q get dhcp.@dnsmasq[0].server 2>/dev/null"),
+    resolv = sh("grep nameserver /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null"),
+  }
+end
+
+function R.dns_set()
+  if qs.servers ~= nil then
+    sh("uci -q delete dhcp.@dnsmasq[0].server")
+    for s in tostring(qs.servers):gmatch("[^%s,]+") do
+      if s:match("^[%d%.]+$") then sh("uci add_list dhcp.@dnsmasq[0].server="..shq(s)) end
+    end
+    uci_commit("dhcp"); sh("/etc/init.d/dnsmasq restart")
+  end
+  return { ok=true }
+end
+
+-- OpenVPN profile listing
+function R.ovpn()
+  return { files = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null")) }
+end
+
 -- System: language / timezone / upgrade / backup / reboot / logs
 function R.system()
   return {

@@ -509,19 +509,11 @@
         ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
-      <div class="btn-row">
-        <button id="cl-start">${esc(t("start", "v"))}</button>
-        <button class="ghost" id="cl-stop">${esc(t("stop", "v"))}</button>
-      </div>
+      ${serviceBtns("mihomo")}
       <p class="muted small">${esc(t("clash_note", "v"))}</p>
-      <p class="small muted">${esc(t("requires_pkg", "v"))}: <code>mihomo</code></p>
     </div>`);
   };
-  VIEWS.clash.mount = function () {
-    const s = $("#cl-start"), p = $("#cl-stop");
-    if (s) s.onclick = async () => { const r = await apiPost("clash_set", { action: "start" }); toast(r.ok ? t("started", "v") : t("failed", "v"), r.ok ? "ok" : "err"); };
-    if (p) p.onclick = async () => { const r = await apiPost("clash_set", { action: "stop" }); toast(r.ok ? t("stopped", "v") : t("failed", "v"), r.ok ? "ok" : "err"); };
-  };
+  VIEWS.clash.mount = bindSvc;
 
   VIEWS.mirror = async function () {
     const d = await apiGet("mirror");
@@ -602,34 +594,194 @@
     };
   };
 
-  // Generic placeholder views for GL sections whose daemons may be absent.
-  function placeholder(key, pkg) {
-    return async function () {
+  /* ---------- real feature pages (status + control) ---------- */
+  function serviceBtns(svc) {
+    return `<div class="btn-row">
+      <button data-svc="${svc}" data-act="start">${esc(t("start", "v"))}</button>
+      <button class="ghost" data-svc="${svc}" data-act="stop">${esc(t("stop", "v"))}</button>
+      <button class="ghost" data-svc="${svc}" data-act="restart">${esc(t("restart"))}</button>
+    </div>`;
+  }
+  function bindSvc() {
+    document.querySelectorAll("[data-svc]").forEach(b => {
+      b.onclick = async () => {
+        const r = await apiPost("service_set", { s: b.getAttribute("data-svc"), action: b.getAttribute("data-act") });
+        toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+        render();
+      };
+    });
+  }
+  function serviceView(key, pkg) {
+    const fn = async function () {
+      const d = await apiGet("service", { s: key });
       return wrap(`<div class="card"><h2>${esc(t(key, "nav"))}</h2>
-        <p class="muted">${esc(t("scaffold_note", "v"))}</p>
-        ${pkg ? `<p class="small muted">${esc(t("requires_pkg", "v"))}: <code>${esc(pkg)}</code></p>` : ""}
+        <div class="grid">
+          ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+          ${stat(t("status"), d.running ? t("running") : t("stopped"))}
+        </div>
+        ${serviceBtns(key)}
+        ${!d.installed ? `<p class="small muted">${esc(t("requires_pkg", "v"))}: <code>${esc(pkg || "")}</code></p>` : ""}
       </div>`);
     };
+    fn.mount = bindSvc;
+    return fn;
   }
-  VIEWS.multiwan = placeholder("multiwan", "mwan3");
-  VIEWS.wgclient = placeholder("wgclient", "wireguard-tools");
-  VIEWS.wgserver = placeholder("wgserver", "wireguard-tools");
-  VIEWS.ovpnclient = placeholder("ovpnclient", "openvpn-openssl");
-  VIEWS.ovpnserver = placeholder("ovpnserver", "openvpn-openssl");
-  VIEWS.tor = placeholder("tor", "tor");
-  VIEWS.parental = placeholder("parental", "luci-app-parental-control");
-  VIEWS.tailscale = placeholder("tailscale", "tailscale");
-  VIEWS.zerotier = placeholder("zerotier", "zerotier");
-  VIEWS.astrowarp = placeholder("astrowarp", "");
-  VIEWS.edgerouter = placeholder("edgerouter", "");
-  VIEWS.dns = placeholder("dns", "dnsmasq");
-  VIEWS.ipv6 = placeholder("ipv6", "odhcp6c");
-  VIEWS.firewall = placeholder("firewall", "firewall4");
-  VIEWS.vlan = placeholder("vlan", "netifd");
-  VIEWS.upgrade = placeholder("upgrade", "auc");
-  VIEWS.advanced = placeholder("advanced", "luci");
-  VIEWS.security = placeholder("security", "dropbear");
-  VIEWS.backup = placeholder("backup", "sysupgrade");
+
+  VIEWS.multiwan = async function () {
+    const d = await apiGet("mwan");
+    return wrap(`<div class="card"><h2>${esc(t("multiwan", "nav"))}</h2>
+      <div class="grid">
+        ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+        ${stat(t("status"), d.running ? t("running") : t("stopped"))}
+      </div>
+      ${serviceBtns("mwan3")}
+      <pre class="log">${esc(d.status || d.interfaces || t("none"))}</pre>
+    </div>`);
+  };
+  VIEWS.multiwan.mount = bindSvc;
+
+  VIEWS.wgclient = async function () {
+    const d = await apiGet("vpn");
+    const rows = arr(d.wireguard).map(w => `<tr><td>${esc(w.iface)}</td><td>${esc(w.peers)}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("wgclient", "nav"))}</h2>
+      <div class="grid">${stat("WireGuard", d.wg_installed ? t("installed") : t("not_installed"))}</div>
+      <table><thead><tr><th>${esc(t("wg_iface", "v"))}</th><th>${esc(t("peers", "v"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("wg_hint", "v"))}</p>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/network/network" target="_blank">LuCI</a></div>
+    </div>`);
+  };
+  VIEWS.wgserver = VIEWS.wgclient;
+
+  VIEWS.ovpnclient = async function () {
+    const [d, o] = await Promise.all([apiGet("vpn"), apiGet("ovpn")]);
+    return wrap(`<div class="card"><h2>${esc(t("ovpnclient", "nav"))}</h2>
+      <div class="grid">${stat("OpenVPN", d.ovpn_installed ? t("installed") : t("not_installed"))}</div>
+      ${serviceBtns("openvpn")}
+      <p class="small muted">${esc(t("profiles", "v"))}: ${esc(o.files || t("none"))}</p>
+      <p class="small muted">${esc(t("ovpn_hint", "v"))}</p>
+    </div>`);
+  };
+  VIEWS.ovpnclient.mount = bindSvc;
+  VIEWS.ovpnserver = VIEWS.ovpnclient;
+
+  VIEWS.tor = serviceView("tor", "tor");
+  VIEWS.tailscale = serviceView("tailscale", "tailscale");
+
+  VIEWS.zerotier = async function () {
+    const d = await apiGet("zerotier");
+    return wrap(`<div class="card"><h2>${esc(t("zerotier", "nav"))}</h2>
+      <div class="grid">${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}</div>
+      <pre class="log">${esc((d.info || "") + "\n" + (d.networks || "")) || esc(t("none"))}</pre>
+      <div class="row"><div><label>Network ID</label><input id="zt-nwid" placeholder="8056c2e21c000001"></div></div>
+      <div class="btn-row"><button id="zt-join">${esc(t("connect"))}</button></div>
+    </div>`);
+  };
+  VIEWS.zerotier.mount = function () {
+    const b = $("#zt-join");
+    if (b) b.onclick = async () => {
+      const r = await apiPost("zerotier_set", { action: "join", nwid: $("#zt-nwid").value.trim() });
+      toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render();
+    };
+  };
+
+  VIEWS.dns = async function () {
+    const d = await apiGet("dns");
+    return wrap(`<div class="card"><h2>${esc(t("dns", "nav"))}</h2>
+      <div><label>${esc(t("upstream_dns", "v"))}</label><input id="dns-servers" value="${esc(d.servers || "")}"></div>
+      <p class="small muted">${esc(d.resolv || "")}</p>
+      <div class="btn-row"><button id="dns-save">${esc(t("save"))}</button></div>
+    </div>`);
+  };
+  VIEWS.dns.mount = function () {
+    $("#dns-save").onclick = async () => {
+      const r = await apiPost("dns_set", { servers: $("#dns-servers").value });
+      toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+    };
+  };
+
+  VIEWS.ipv6 = async function () {
+    const d = await apiGet("network");
+    const rows = arr(d.interfaces).map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.ip || "-")}</td><td>${i.up ? t("on") : t("off")}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("ipv6", "nav"))}</h2>
+      <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="small muted">IPv6 (wan6/odhcp6c) is configured in /etc/config/network; use LuCI for advanced IPv6.</p>
+    </div>`);
+  };
+
+  VIEWS.firewall = async function () {
+    const d = await apiGet("portforward");
+    const rows = arr(d.rules).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.proto)}</td><td>${esc(r.src_dport)}</td><td>${esc(r.dest_ip)}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("firewall", "nav"))}</h2>
+      <p class="small muted">Zones/rules via fw4. Forwarded ports:</p>
+      <table><thead><tr><th>${esc(t("name"))}</th><th>${esc(t("proto", "v"))}</th><th>${esc(t("ext_port", "v"))}</th><th>${esc(t("internal_ip", "v"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a></div>
+    </div>`);
+  };
+
+  VIEWS.vlan = async function () {
+    const d = await apiGet("network");
+    const rows = arr(d.interfaces).map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.ip || "-")}</td><td>${i.up ? t("on") : t("off")}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("vlan", "nav"))}</h2>
+      <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="small muted">Create 802.1Q VLAN interfaces in LuCI (Network → Interfaces → Devices).</p>
+    </div>`);
+  };
+
+  VIEWS.upgrade = async function () {
+    const d = await apiGet("overview");
+    return wrap(`<div class="card"><h2>${esc(t("upgrade", "nav"))}</h2>
+      <div class="grid">${stat(t("firmware"), d.firmware, true)}</div>
+      <p class="small muted">Upload a sysupgrade image in LuCI (System → Backup / Flash Firmware).</p>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Flash</a></div>
+    </div>`);
+  };
+
+  VIEWS.advanced = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("advanced", "nav"))}</h2>
+      <p class="small muted">Full LuCI, package manager and diagnostics.</p>
+      <div class="btn-row">
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin" target="_blank">LuCI</a>
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/mirror">${esc(t("mirror", "nav"))} ›</a>
+      </div>
+    </div>`);
+  };
+
+  VIEWS.security = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("security", "nav"))}</h2>
+      <p class="small muted">Change the admin (root) password in LuCI → System → Administration.</p>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/admin" target="_blank">LuCI Admin</a></div>
+    </div>`);
+  };
+
+  VIEWS.backup = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("backup", "nav"))}</h2>
+      <p class="small muted">Download / restore the configuration archive.</p>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/backup" target="_blank">LuCI Backup</a></div>
+    </div>`);
+  };
+
+  VIEWS.parental = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("parental", "nav"))}</h2>
+      <p class="small muted">Restrict device access via firewall rules. See connected devices and manage rules.</p>
+      <div class="btn-row">
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/clients">${esc(t("clients", "nav"))} ›</a>
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/network/firewall" target="_blank">LuCI Firewall</a>
+      </div>
+    </div>`);
+  };
+
+  VIEWS.astrowarp = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("astrowarp", "nav"))}</h2>
+      <p class="small muted">AstroWarp is a GL.iNet proprietary service and is not available as an open-source OpenWrt package.</p>
+    </div>`);
+  };
+  VIEWS.edgerouter = async function () {
+    return wrap(`<div class="card"><h2>${esc(t("edgerouter", "nav"))}</h2>
+      <p class="small muted">EdgeRouter is a GL.iNet proprietary feature and is not available as an open-source OpenWrt package.</p>
+    </div>`);
+  };
 
   /* ---------------- router ---------------- */
   const DEFAULT_ROUTE = "overview";
