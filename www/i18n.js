@@ -29,6 +29,7 @@ window.I18N = {
       stopped:"Stopped", saved:"Saved", failed:"Failed", confirm:"Confirm",
       reboot_confirm:"Reboot the router now?", language:"Language", model:"Model",
       restart:"Restart",
+      configure:"Configure",
       firmware:"Firmware", uptime:"Uptime", load:"Load", memory:"Memory",
       clients:"Clients", wan_ip:"WAN IP", storage:"Storage", hostname:"Hostname"
     },
@@ -97,6 +98,7 @@ window.I18N = {
       stopped:"已停止", saved:"已保存", failed:"失败", confirm:"确认",
       reboot_confirm:"现在重启路由器吗？", language:"语言", model:"型号",
       restart:"重启服务",
+      configure:"配置",
       firmware:"固件", uptime:"运行时间", load:"负载", memory:"内存",
       clients:"客户端数", wan_ip:"WAN 地址", storage:"存储", hostname:"主机名"
     },

@@ -61,6 +61,10 @@
     setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 300); }, 2200);
   }
 
+  function cfgBtn(href) {
+    return `<a class="ghost" style="padding:9px 16px;border-radius:9px" href="${href}" target="_blank">${esc(t("configure"))}</a>`;
+  }
+
   function stat(k, v, small, href) {
     const inner = `<div class="k">${esc(k)}</div><div class="v ${small ? "sm" : ""}">${esc(v || "-")}</div>`;
     return href
@@ -184,6 +188,7 @@
           ${stat(t("clients", "nav"), d.clients, false, "clients")}
           ${stat(t("storage"), d.storage || "-", false, "nas")}
         </div>
+        <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/status/overview")}</div>
       </div>`);
   };
 
@@ -207,7 +212,7 @@
       </div>
       <div class="card"><h2>${esc(t("repeater_title", "v"))}</h2>
         <p class="muted small">${esc(t("repeater_note", "v"))}</p>
-        <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button></div>
+        <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/wireless")}</div>
         <div id="net-list" style="margin-top:12px">${rows}</div>
       </div>
       <div class="card"><h2>${esc(t("join_manually", "v"))}</h2>
@@ -271,6 +276,7 @@
         <div class="btn-row">
           <button id="hf-on">${esc(t("enable_share", "v"))}</button>
           <button class="ghost" id="hf-off">${esc(t("disabled"))}</button>
+          ${cfgBtn("/cgi-bin/luci/admin/network/wireless")}
         </div>
         <p class="muted small">${esc(t("modem_note", "v"))}</p>
       </div>
@@ -315,7 +321,7 @@
           <div><label>${esc(t("password_netmask", "v"))}</label><input id="w-pass" value="${esc(d.netmask||"")}"></div>
           <div><label>${esc(t("gateway", "v"))}</label><input id="w-gw" value="${esc(d.gateway||"")}"></div>
         </div>
-        <div class="btn-row"><button id="w-save">${esc(t("save"))}</button></div>
+        <div class="btn-row"><button id="w-save">${esc(t("save"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
         <p class="muted small">${esc(t("current_wan_ip", "v"))}: ${esc(d.ip||"-")}</p>
       </div>`);
   };
@@ -340,7 +346,8 @@
     return wrap(`<div class="card"><h2>${esc(t("clients", "nav"))}</h2>
       <table><thead><tr><th>${esc(t("name"))}</th><th>IP</th><th>${esc(t("mac", "v"))}</th>
       <th>${esc(t("status"))}</th><th>${esc(t("source", "v"))}</th></tr></thead><tbody>
-      ${rows || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table></div>`);
+      ${rows || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div></div>`);
   };
 
   VIEWS.wireless = async function () {
@@ -356,7 +363,7 @@
       </div>
       <div class="btn-row"><button data-save-sec="${esc(i.name)}">${esc(t("save"))}</button></div>
     </div>`).join("");
-    return wrap(ifaces || `<div class="muted">${esc(t("no_wireless", "v"))}</div>`);
+    return wrap((ifaces || `<div class="muted">${esc(t("no_wireless", "v"))}</div>`) + `<div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/wireless")}</div>`);
   };
   VIEWS.wireless.mount = function () {
     document.querySelectorAll("[data-save-sec]").forEach(btn => {
@@ -379,7 +386,7 @@
         <div><label>${esc(t("dhcp_start", "v"))}</label><input id="l-s" value="${esc(d.dhcp_start||"")}"></div>
         <div><label>${esc(t("dhcp_limit", "v"))}</label><input id="l-l" value="${esc(d.dhcp_limit||"")}"></div>
       </div>
-      <div class="btn-row"><button id="l-save">${esc(t("save"))}</button></div>
+      <div class="btn-row"><button id="l-save">${esc(t("save"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
       <p class="muted small">${esc(t("lan_note", "v"))}</p></div>`);
   };
   VIEWS.lan.mount = function () {
@@ -399,7 +406,7 @@
         <div><label>${esc(t("ssid"))}</label><input id="g-ssid" value="${esc(guest?guest.ssid:"guest")}"></div>
         <div><label>${esc(t("password"))}</label><input id="g-key" type="password" value="${esc(guest?guest.key:"")}"></div>
       </div>
-      <div class="btn-row"><button id="g-save">${esc(t("save"))}</button></div>
+      <div class="btn-row"><button id="g-save">${esc(t("save"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/wireless")}</div>
       <p class="muted small">${esc(t("guest_apply_note", "v"))}</p>
     </div>`);
   };
@@ -427,7 +434,7 @@
           <div><label>${esc(t("internal_ip", "v"))}</label><input id="p-ip"></div>
           <div><label>${esc(t("internal_port", "v"))}</label><input id="p-dport"></div>
         </div>
-        <div class="btn-row"><button id="p-add">${esc(t("add"))}</button></div></div>`);
+        <div class="btn-row"><button id="p-add">${esc(t("add"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div></div>`);
   };
   VIEWS.ports.mount = function () {
     $("#p-add").onclick = async () => {
@@ -454,6 +461,7 @@
         <button id="ag-start">${esc(t("start", "v"))}</button>
         <button class="ghost" id="ag-stop">${esc(t("stop", "v"))}</button>
         <a class="ghost" style="padding:9px 16px;border-radius:9px" href="http://${esc(location.hostname)}:3000" target="_blank">${esc(t("open_ui", "v"))}</a>
+        ${cfgBtn("/cgi-bin/luci/admin/services/adguardhome")}
       </div>
       <p class="muted small">${esc(t("ag_note", "v"))}</p>
     </div>`);
@@ -471,6 +479,7 @@
       <div class="btn-row">
         <button id="nas-on">${esc(t("enabled"))}</button>
         <button class="ghost" id="nas-off">${esc(t("disabled"))}</button>
+        ${cfgBtn("/cgi-bin/luci/admin/services/samba4")}
       </div>
       <p class="muted small">${esc(t("nas_note", "v"))}</p>
     </div>`);
@@ -486,7 +495,8 @@
     return wrap(`<div class="card"><h2>${esc(t("ddns", "nav"))}</h2>
       <table><thead><tr><th>${esc(t("service", "v"))}</th><th>${esc(t("domain", "v"))}</th><th>${esc(t("enabled"))}</th></tr></thead>
       <tbody>${rows||`<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
-      <p class="muted small">${esc(t("ddns_note", "v"))}</p></div>`);
+      <p class="muted small">${esc(t("ddns_note", "v"))}</p>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/services/ddns")}</div></div>`);
   };
 
   VIEWS.vpn = async function () {
@@ -499,7 +509,8 @@
         ${stat(t("ovpn_profiles", "v"), d.ovpn_count)}
       </div>
       <table style="margin-top:12px"><thead><tr><th>${esc(t("wg_iface", "v"))}</th><th>${esc(t("peers", "v"))}</th></tr></thead>
-      <tbody>${wg||`<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table></div>`);
+      <tbody>${wg||`<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div></div>`);
   };
 
   VIEWS.clash = async function () {
@@ -509,7 +520,7 @@
         ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
-      ${serviceBtns("mihomo")}
+      ${serviceBtns("mihomo", "http://" + location.hostname + ":9090/ui/")}
       <p class="muted small">${esc(t("clash_note", "v"))}</p>
     </div>`);
   };
@@ -547,7 +558,8 @@
     const pkgs = arr(d.packages);
     const rows = pkgs.slice(0, 500).map(p=>`<tr><td class="small">${esc(p)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("plugins", "nav"))} (${d.count||0})</h2>
-      <pre class="log">${esc(pkgs.join("\n"))}</pre></div>`);
+      <pre class="log">${esc(pkgs.join("\n"))}</pre>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/system/package-manager")}</div></div>`);
   };
 
   VIEWS.sysinfo = async function () {
@@ -557,7 +569,7 @@
   VIEWS.logs = async function () {
     const d = await apiGet("logs");
     return wrap(`<div class="card"><h2>${esc(t("logs", "nav"))}</h2>
-      <div class="btn-row"><button id="log-refresh">${esc(t("refresh"))}</button></div>
+      <div class="btn-row"><button id="log-refresh">${esc(t("refresh"))}</button>${cfgBtn("/cgi-bin/luci/admin/status/logs")}</div>
       <pre class="log" id="logbox">${esc(d.syslog||"")}</pre></div>`);
   };
   VIEWS.logs.mount = function () { const b=$("#log-refresh"); if(b) b.onclick = () => render(); };
@@ -572,7 +584,7 @@
           ${zones.map(z=>`<option ${d.timezone===z?"selected":""} value="${z}">${z}</option>`).join("")}
         </select></div>
       </div>
-      <div class="btn-row"><button id="tz-save">${esc(t("save"))}</button></div></div>`);
+      <div class="btn-row"><button id="tz-save">${esc(t("save"))}</button>${cfgBtn("/cgi-bin/luci/admin/system/system")}</div></div>`);
   };
   VIEWS.timezone.mount = function () {
     $("#tz-save").onclick = async () => {
@@ -595,11 +607,12 @@
   };
 
   /* ---------- real feature pages (status + control) ---------- */
-  function serviceBtns(svc) {
+  function serviceBtns(svc, cfg) {
     return `<div class="btn-row">
       <button data-svc="${svc}" data-act="start">${esc(t("start", "v"))}</button>
       <button class="ghost" data-svc="${svc}" data-act="stop">${esc(t("stop", "v"))}</button>
       <button class="ghost" data-svc="${svc}" data-act="restart">${esc(t("restart"))}</button>
+      ${cfg ? cfgBtn(cfg) : ""}
     </div>`;
   }
   function bindSvc() {
@@ -611,7 +624,7 @@
       };
     });
   }
-  function serviceView(key, pkg) {
+  function serviceView(key, pkg, cfg) {
     const fn = async function () {
       const d = await apiGet("service", { s: key });
       return wrap(`<div class="card"><h2>${esc(t(key, "nav"))}</h2>
@@ -619,7 +632,7 @@
           ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
           ${stat(t("status"), d.running ? t("running") : t("stopped"))}
         </div>
-        ${serviceBtns(key)}
+        ${serviceBtns(key, cfg)}
         ${!d.installed ? `<p class="small muted">${esc(t("requires_pkg", "v"))}: <code>${esc(pkg || "")}</code></p>` : ""}
       </div>`);
     };
@@ -634,7 +647,7 @@
         ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
-      ${serviceBtns("mwan3")}
+      ${serviceBtns("mwan3", "/cgi-bin/luci/admin/network/mwan3")}
       <pre class="log">${esc(d.status || d.interfaces || t("none"))}</pre>
     </div>`);
   };
@@ -657,7 +670,7 @@
     const [d, o] = await Promise.all([apiGet("vpn"), apiGet("ovpn")]);
     return wrap(`<div class="card"><h2>${esc(t("ovpnclient", "nav"))}</h2>
       <div class="grid">${stat("OpenVPN", d.ovpn_installed ? t("installed") : t("not_installed"))}</div>
-      ${serviceBtns("openvpn")}
+      ${serviceBtns("openvpn", "/cgi-bin/luci/admin/vpn/openvpn")}
       <p class="small muted">${esc(t("profiles", "v"))}: ${esc(o.files || t("none"))}</p>
       <p class="small muted">${esc(t("ovpn_hint", "v"))}</p>
     </div>`);
@@ -665,8 +678,8 @@
   VIEWS.ovpnclient.mount = bindSvc;
   VIEWS.ovpnserver = VIEWS.ovpnclient;
 
-  VIEWS.tor = serviceView("tor", "tor");
-  VIEWS.tailscale = serviceView("tailscale", "tailscale");
+  VIEWS.tor = serviceView("tor", "tor", "/cgi-bin/luci/admin/services/tor");
+  VIEWS.tailscale = serviceView("tailscale", "tailscale", "/cgi-bin/luci/admin/network/network");
 
   VIEWS.zerotier = async function () {
     const d = await apiGet("zerotier");
@@ -674,7 +687,7 @@
       <div class="grid">${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}</div>
       <pre class="log">${esc((d.info || "") + "\n" + (d.networks || "")) || esc(t("none"))}</pre>
       <div class="row"><div><label>Network ID</label><input id="zt-nwid" placeholder="8056c2e21c000001"></div></div>
-      <div class="btn-row"><button id="zt-join">${esc(t("connect"))}</button></div>
+      <div class="btn-row"><button id="zt-join">${esc(t("connect"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
   VIEWS.zerotier.mount = function () {
@@ -690,7 +703,7 @@
     return wrap(`<div class="card"><h2>${esc(t("dns", "nav"))}</h2>
       <div><label>${esc(t("upstream_dns", "v"))}</label><input id="dns-servers" value="${esc(d.servers || "")}"></div>
       <p class="small muted">${esc(d.resolv || "")}</p>
-      <div class="btn-row"><button id="dns-save">${esc(t("save"))}</button></div>
+      <div class="btn-row"><button id="dns-save">${esc(t("save"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/dhcp")}</div>
     </div>`);
   };
   VIEWS.dns.mount = function () {
@@ -706,6 +719,7 @@
     return wrap(`<div class="card"><h2>${esc(t("ipv6", "nav"))}</h2>
       <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="small muted">IPv6 (wan6/odhcp6c) is configured in /etc/config/network; use LuCI for advanced IPv6.</p>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
 
@@ -716,7 +730,7 @@
       <p class="small muted">Zones/rules via fw4. Forwarded ports:</p>
       <table><thead><tr><th>${esc(t("name"))}</th><th>${esc(t("proto", "v"))}</th><th>${esc(t("ext_port", "v"))}</th><th>${esc(t("internal_ip", "v"))}</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a></div>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a>${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div>
     </div>`);
   };
 
@@ -726,6 +740,7 @@
     return wrap(`<div class="card"><h2>${esc(t("vlan", "nav"))}</h2>
       <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="small muted">Create 802.1Q VLAN interfaces in LuCI (Network → Interfaces → Devices).</p>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
 
@@ -758,7 +773,7 @@
   VIEWS.backup = async function () {
     return wrap(`<div class="card"><h2>${esc(t("backup", "nav"))}</h2>
       <p class="small muted">Download / restore the configuration archive.</p>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/backup" target="_blank">LuCI Backup</a></div>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Backup</a></div>
     </div>`);
   };
 
