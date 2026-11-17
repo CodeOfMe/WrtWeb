@@ -210,6 +210,15 @@
     const leaseRows = arr(d.leases).map(l => `<tr>
       <td>${esc(l.host || "-")}</td><td>${esc(l.ip)}</td><td class="small">${esc(l.mac)}</td></tr>`).join("");
     const aps = arr(d.wireless).map(w => `<span class="tag">${esc(w.ssid || "-")} · ${esc(w.radio || "")}</span>`).join(" ");
+    const tempName = (x) => ({
+      cpu: t("cpu_temp", "v"), wifi2g: t("wifi_2g_temp", "v"), wifi5g: t("wifi_5g_temp", "v")
+    })[x.key] || x.name || t("temp_other", "v");
+    const tempTiles = arr(d.temps).map(x => {
+      const c = Number(x.c) || 0;
+      const cls = c >= 85 ? "hot" : c >= 70 ? "warm" : "cool";
+      return `<div class="stat"><div class="k">${esc(tempName(x))}</div>
+        <div class="v temp ${cls}">${c.toFixed(1)} °C</div></div>`;
+    }).join("");
     return wrap(`
       <div class="card"><h2>${esc(t("sysinfo", "nav"))}</h2>
         <div class="grid">
@@ -221,6 +230,10 @@
           ${stat(t("uptime"), uh + "h " + um + "m", false, "sysinfo")}
           ${stat(t("load"), d.load, false, "sysinfo")}
         </div>
+      </div>
+
+      <div class="card"><h2>${esc(t("temperature", "v"))}</h2>
+        <div class="grid">${tempTiles || `<p class="muted small">${esc(t("temp_none", "v"))}</p>`}</div>
       </div>
 
       <div class="card"><h2>${esc(t("memory"))}</h2>

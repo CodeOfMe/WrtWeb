@@ -167,12 +167,45 @@ function R.overview()
   for ifn in sh("iw dev 2>/dev/null"):gmatch("Interface (%S+)") do
     stations = stations + (tonumber(trim(sh("iw dev "..ifn.." station dump 2>/dev/null | grep -c Station"))) or 0)
   end
+  -- temperatures from hwmon (millidegrees C); label Wi-Fi phy by its band
+  local phy_band = {}
+  for ifn in sh("iw dev 2>/dev/null"):gmatch("Interface (%S+)") do
+    local info = sh("iw dev "..ifn.." info 2>/dev/null")
+    local wiphy = tonumber(info:match("wiphy%s+(%d+)"))
+    local ch = tonumber(info:match("channel%s+(%d+)"))
+    if wiphy and ch then
+      phy_band[wiphy] = (ch <= 14 and "2.4g") or (ch >= 32 and "5g") or nil
+    end
+  end
+  local temps = {}
+  for dir in sh("ls -d /sys/class/hwmon/hwmon* 2>/dev/null"):gmatch("[^\n]+") do
+    local name = trim(sh("cat "..dir.."/name 2>/dev/null"))
+    for f in sh("ls "..dir.." 2>/dev/null"):gmatch("(temp%d+_input)") do
+      local raw = tonumber(trim(sh("cat "..dir.."/"..f.." 2>/dev/null")))
+      if raw and raw > 0 then
+        local key, label, order = "other", name, 3
+        local lower = name:lower()
+        if lower:match("cpu") or lower:match("soc") or lower:match("thermal") then
+          key, label, order = "cpu", "CPU", 1
+        else
+          local phy = tonumber(name:match("phy(%d+)"))
+          local band = phy and phy_band[phy]
+          if band == "2.4g" then key, label, order = "wifi2g", "Wi-Fi 2.4G", 2
+          elseif band == "5g" then key, label, order = "wifi5g", "Wi-Fi 5G", 2
+          elseif phy then key, label, order = "wifi", name, 2 end
+        end
+        temps[#temps+1] = { key=key, name=label, sensor=name, c=math.floor(raw/100)/10, order=order }
+      end
+    end
+  end
+  table.sort(temps, function(a,b) return a.order < b.order end)
   local log = sh("logread -l 25 2>/dev/null")
   return {
     model=model, firmware=fw, kernel=kernel, hostname=host, localtime=localtime,
     uptime=up, load=load,
     mem_total=mt, mem_free=mfree, mem_avail=mavail, mem_buffers=mbuf, mem_cached=mcache,
     mem_used=(mt-mavail), mem_pct=(mt>0 and math.floor((mt-mavail)*100/mt) or 0),
+    temps=temps,
     storage=storage,
     wan_ip=wan4, wan_ip6=wan6, wan_proto=wanproto, wan_mac=wanmac,
     wan_uptime=wanup, wan_rx=wanrx, wan_tx=wantx, wan_dns=wandns,

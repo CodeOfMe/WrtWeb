@@ -38,6 +38,9 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .stat .k{font-size:12px;color:var(--muted);margin-bottom:6px}
 .stat .v{font-size:18px;font-weight:600;word-break:break-all}
 .stat .v.sm{font-size:14px;font-weight:500}
+.stat .v.temp.cool{color:#22c55e}
+.stat .v.temp.warm{color:#f59e0b}
+.stat .v.temp.hot{color:#ef4444}
 label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 5px}
 input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
   border-radius:9px;padding:9px 11px;font-size:14px}
