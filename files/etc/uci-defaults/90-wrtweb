@@ -5,4 +5,8 @@
 # Auto-select the fastest package mirror (TUNA/USTC/official) once network is up.
 ( sleep 25; /usr/libexec/wrtweb/mirror.sh auto >/dev/null 2>&1 ) &
 
+# Re-join the repeater uplink if it was configured, then keep the link alive.
+( sleep 20; [ "$(uci -q get wrtweb.repeater.enabled)" = "1" ] && \
+    sh /usr/libexec/wrtweb/repeater.sh apply >/dev/null 2>&1 ) &
+
 exit 0

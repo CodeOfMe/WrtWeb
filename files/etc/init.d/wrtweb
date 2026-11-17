@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+# WrtWeb repeater: re-join the upstream network after boot and keep the
+# watchdog that re-establishes the link running.
+
+START=95
+
+start() {
+	[ "$(uci -q get wrtweb.repeater.enabled)" = "1" ] || return 0
+	sh /usr/libexec/wrtweb/repeater.sh apply >/dev/null 2>&1 &
+}
+
+restart() {
+	start
+}

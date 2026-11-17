@@ -46,6 +46,72 @@ end
 
 local function uci_commit(cfg) sh("uci commit "..cfg) end
 
+-- UCI section names: letters, digits, underscore and dash
+local function norm_name(s)
+  return tostring(s or ""):gsub("[^%w%-_]", "")
+end
+
+-- what iwinfo reports in a scan -> the crypto name netifd expects
+local function crypto_for(scan_enc)
+  local e = (scan_enc or ""):upper()
+  if e == "NONE" or e == "OPEN" or e == "OWE" then return "none" end
+  if e:match("WPA3") and e:match("WPA2") then return "psk-mixed" end
+  if e:match("WPA3") then return "sae" end
+  if e:match("WPA2") then return "psk2" end
+  if e:match("WPA") then return "psk" end
+  return "psk2"
+end
+
+-- parse a UCI config into section -> option values
+local function uci_sections(cfg)
+  local secs = {}
+  for line in sh("uci -q show " .. cfg):gmatch("[^\n]+") do
+    local rest = line:match("^" .. cfg .. "%.(.+)$")
+    if rest then
+      -- an option line is "cfg.section.key=value"; a section line is "cfg.section=type"
+      local sec, key, val = rest:match("^(.-)%.([%w_]+)=(.*)$")
+      if not sec then sec, val = rest:match("^(.-)=(.*)$"); key = "type" end
+      if sec then
+        -- values are single-quoted; list values may hold several quoted items on one line
+        val = (val:gsub("'", ""):gsub('"', ""))
+        if not secs[sec] then secs[sec] = {} end
+        if secs[sec][key] then secs[sec][key] = secs[sec][key] .. " " .. val
+        else secs[sec][key] = val end
+      end
+    end
+  end
+  return secs
+end
+
+local UCI_TYPES = {
+  zone = true, rule = true, redirect = true, defaults = true,
+  forwarding = true, device = true, interface = true,
+}
+
+local function section_kind(name, s)
+  if s.type then return s.type end
+  local base = (name:gsub("@", ""):gsub("%[", ""):gsub("%]", ""):lower():match("^(%a+)")) or ""
+  if UCI_TYPES[base] then return base end
+  -- named sections do not carry their type in `uci show`, so infer from the keys
+  if s.input or s.output or s.forward then return "zone" end
+  if s.dest_ip or s.src_dport then return "redirect" end
+  if s.src and s.target then return "rule" end
+  return base
+end
+
+-- pairs() is unordered, so walk UCI sections in index order for stable output
+local function sorted_names(secs)
+  local names = {}
+  for n in pairs(secs) do names[#names + 1] = n end
+  local function idx(n) return tonumber(n:match("%[(%d+)%]")) or 10000 end
+  table.sort(names, function(a, b)
+    local ai, bi = idx(a), idx(b)
+    if ai ~= bi then return ai < bi end
+    return a < b
+  end)
+  return names
+end
+
 -- JSON encoder
 local function json_escape(s)
   s = tostring(s)
@@ -91,8 +157,9 @@ end
 local function parse_qs(s)
   local out = {}
   for k, v in (s or ""):gmatch("([^&=]+)=([^&=]*)") do
-    out[k] = v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h,16)) end)
-                :gsub("+", " ")
+    -- form encoding: '+' is a space, so fold it before decoding %XX (a base64 key
+    -- arrives as %2B and must keep its '+')
+    out[k] = v:gsub("+", " "):gsub("%%(%x%x)", function(h) return string.char(tonumber(h,16)) end)
   end
   return out
 end
@@ -481,30 +548,103 @@ function R.repeater_scan()
   return { networks=nets }
 end
 
+-- UCI section of the station (client) interface, its live interface name and radio
+local function sta_iface()
+  local sec, ifn, dev = "", "", ""
+  for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='sta'") do
+    sec = name; dev = uci_get("wireless", name, "device") break
+  end
+  if sec ~= "" then
+    for s, n in sh("ubus call network.wireless status 2>/dev/null"):gmatch(
+        '"section"%s*:%s*"([^"]+)".-"ifname"%s*:%s*"([^"]+)"') do
+      if s == sec then ifn = n break end
+    end
+  end
+  return sec, ifn, dev
+end
+
+function R.repeater_status()
+  local cfg = uci_sections("wrtweb")["repeater"] or {}
+  local sec, ifn, dev = sta_iface()
+  local out = { config = cfg, section = sec, iface = ifn, radio = dev,
+                connected = false, bssid = "", signal = 0, quality = "",
+                network = "", net_up = false, net_ip = "", uptime = 0,
+                ap_same_radio = 0, watch_running = false }
+  if ifn ~= "" then
+    local bssid = trim(sh("iw dev " .. ifn .. " link 2>/dev/null"):match("Connected with (%S+)") or "")
+    out.bssid = bssid; out.connected = bssid ~= ""
+    local info = sh("iwinfo " .. ifn .. " info 2>/dev/null")
+    out.quality = trim(info:match("Link Quality:%s*([^\n]+)") or "")
+    out.signal = tonumber(info:match("Signal:%s*(%-?%d+)")) or 0
+  end
+  local net = uci_get("wireless", sec, "network") or "wwan"
+  out.network = net
+  if sec ~= "" then
+    local j = sh("ubus call network.interface." .. net .. " status 2>/dev/null")
+    local function jf(q) return trim(sh("printf '%s' " .. shq(j) .. " | jsonfilter -e " .. shq(q))) end
+    out.net_up = jf("@.up") == "true"
+    out.net_ip = jf('@["ipv4-address"][0].address')
+    out.uptime = tonumber(jf("@.uptime")) or 0
+  end
+  for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+    if uci_get("wireless", name, "device") == dev then out.ap_same_radio = out.ap_same_radio + 1 end
+  end
+  local pid = trim(sh("cat /tmp/wrtweb-repeater.pid 2>/dev/null"))
+  out.watch_running = pid ~= "" and sh("kill -0 " .. pid .. " 2>/dev/null && echo yes") == "yes"
+  return out
+end
+
 function R.repeater_join()
   local ssid = qs.ssid or ""
-  local key  = qs.key or ""
-  local enc  = qs.encryption or "psk2"
-  local bssid = qs.bssid or ""
   if ssid == "" then return { ok=false, error="missing ssid" } end
-  -- create sta interface
-  local radio = trim(sh("uci -q get wireless.@wifi-iface[0].radio")); radio = radio ~= "" and radio or "radio0"
-  sh("uci -q delete wireless.wwan")
-  uci_set("wireless.wwan", "wifi-iface")
-  uci_set("wireless.wwan.device", radio)
-  uci_set("wireless.wwan.mode", "sta")
-  uci_set("wireless.wwan.ssid", ssid)
-  uci_set("wireless.wwan.network", "wwan")
-  uci_set("wireless.wwan.encryption", enc)
-  if key ~= "" then uci_set("wireless.wwan.key", key) end
-  if bssid ~= "" then uci_set("wireless.wwan.bssid", bssid) end
-  uci_commit("wireless")
-  sh("uci -q delete network.wwan")
-  uci_set("network.wwan", "interface")
-  uci_set("network.wwan.proto", "dhcp")
-  uci_commit("network")
-  sh("wifi reload"); sh("ifup wwan")
-  return { ok=true }
+  local enc = crypto_for(qs.encryption or "psk2")
+  local _, _, dev = sta_iface()
+  local radio = qs.radio or ""
+  if radio == "" then radio = dev end
+  if radio == "" then
+    for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)=wifi%-device") do radio = name break end
+  end
+
+  uci_set("wrtweb.repeater.enabled", "1")
+  uci_set("wrtweb.repeater.mode", "client")
+  uci_set("wrtweb.repeater.ssid", ssid)
+  if (qs.key or "") ~= "" then uci_set("wrtweb.repeater.key", qs.key) end
+  uci_set("wrtweb.repeater.encryption", enc)
+  uci_set("wrtweb.repeater.radio", radio)
+  if (qs.bssid or "") ~= "" then uci_set("wrtweb.repeater.bssid", qs.bssid) end
+  if qs.auto ~= "" then uci_set("wrtweb.repeater.auto", qs.auto) end
+  uci_commit("wrtweb")
+
+  -- the helper writes the station interface, applies it and starts the watchdog
+  local msg = trim(sh("sh /usr/libexec/wrtweb/repeater.sh apply 2>/dev/null"))
+  return { ok = (msg:match("^ok") ~= nil), message = msg, encryption = enc }
+end
+
+function R.repeater_action()
+  local act = qs.action or ""
+  local sec, ifn, _ = sta_iface()
+  if sec == "" then return { ok=false, error="no station interface" } end
+  local net = uci_get("wireless", sec, "network") or "wwan"
+  if act == "reconnect" then
+    sh("ifdown " .. net .. " 2>/dev/null")
+    sh("sleep 2 2>/dev/null")
+    if ifn ~= "" and sh("command -v wpa_cli") ~= "" then
+      sh("wpa_cli -i " .. ifn .. " reassociate >/dev/null 2>&1")
+    end
+    sh("wifi reload 2>/dev/null")
+    sh("ifup " .. net .. " 2>/dev/null")
+    return { ok=true }
+  elseif act == "stop" then
+    uci_set("wrtweb.repeater.enabled", "0")
+    uci_set("wireless." .. sec .. ".disabled", "1")
+    uci_commit("wrtweb"); uci_commit("wireless")
+    sh("ifdown " .. net .. " 2>/dev/null")
+    sh("wifi reload 2>/dev/null")
+    local pid = trim(sh("cat /tmp/wrtweb-repeater.pid 2>/dev/null"))
+    if pid ~= "" then sh("kill " .. pid .. " 2>/dev/null"); sh("rm -f /tmp/wrtweb-repeater.pid") end
+    return { ok=true }
+  end
+  return { ok=false, error="unknown action" }
 end
 
 -- USB modem uplink
@@ -932,6 +1072,149 @@ function R.ovpn()
   return { files = files, count = #files }
 end
 
+-- WireGuard straight from UCI (netifd's wireguard proto) + live handshake state
+function R.wireguard()
+  local net = uci_sections("network")
+  local haswg = sh("command -v wg") ~= ""
+  local out = {}
+  for _, n in ipairs(sorted_names(net)) do
+    local s = net[n]
+    if section_kind(n, s) == "interface" and s.proto == "wireguard" then
+      local ifname = s.name or n
+      local pub = ""
+      if haswg and (s.private_key or "") ~= "" then
+        pub = trim(sh("printf '%s' " .. shq(s.private_key) .. " | wg pubkey 2>/dev/null"))
+      end
+      local live, xfer = {}, {}
+      if haswg then
+        for line in sh("wg show " .. shq(ifname) .. " 2>/dev/null"):gmatch("[^\n]+") do
+          local k, ep, age = line:match("^(%x+) %(([^)]*)%) (%d+)s")
+          if k then live[k] = { endpoint = ep, handshake = tonumber(age) } end
+        end
+        for line in sh("wg show " .. shq(ifname) .. " transferred 2>/dev/null"):gmatch("[^\n]+") do
+          local k, rx, tx = line:match("^(%x+) (%d+) (%d+)")
+          if k then xfer[k] = { rx = tonumber(rx), tx = tonumber(tx) } end
+        end
+      end
+      local peers = {}
+      for pname in (s.peers or ""):gmatch("%S+") do
+        local p = net[pname] or {}
+        local key = p.public_key or ""
+        local l, t = live[key] or {}, xfer[key] or {}
+        peers[#peers + 1] = {
+          name = pname, public_key = key, allowed_ips = p.allowed_ips or "",
+          endpoint = p.endpoint or l.endpoint or "", port = p.port or "",
+          handshake = l.handshake, rx = t.rx, tx = t.tx,
+        }
+      end
+      out[#out + 1] = {
+        section = n, name = ifname, public_key = pub, listen_port = s.listen_port or "",
+        addresses = s.addresses or "", mtu = s.mtu or "", peers = peers,
+        running = sh("ip link show " .. shq(ifname) .. " 2>/dev/null"):match("state UP") ~= nil,
+      }
+    end
+  end
+  return { interfaces = out, tools = haswg }
+end
+
+function R.wireguard_keygen()
+  if sh("command -v wg") == "" then return { ok=false, error="wireguard-tools not installed" } end
+  local key = trim(sh("wg genkey 2>/dev/null"))
+  if key == "" then return { ok=false, error="keygen failed" } end
+  return { ok=true, private_key=key, public_key=trim(sh("printf '%s' " .. shq(key) .. " | wg pubkey 2>/dev/null")) }
+end
+
+function R.wireguard_new()
+  if sh("command -v wg") == "" then return { ok=false, error="wireguard-tools not installed" } end
+  local name = norm_name(qs.name or "")
+  if name == "" then return { ok=false, error="missing name" } end
+  local key = trim(sh("wg genkey 2>/dev/null"))
+  if key == "" then return { ok=false, error="keygen failed" } end
+  sh("uci -q delete network." .. name .. " >/dev/null 2>&1")
+  uci_set("network." .. name, "interface")
+  uci_set("network." .. name .. ".proto", "wireguard")
+  uci_set("network." .. name .. ".private_key", key)
+  if (qs.address or "") ~= "" then sh("uci add_list network." .. name .. ".addresses=" .. shq(qs.address) .. " >/dev/null 2>&1") end
+  if (qs.port or "") ~= "" then uci_set("network." .. name .. ".listen_port", qs.port) end
+  uci_commit("network")
+  sh("ubus call network reload 2>/dev/null")
+  return { ok=true, name=name, public_key=trim(sh("printf '%s' " .. shq(key) .. " | wg pubkey 2>/dev/null")) }
+end
+
+function R.wireguard_peer()
+  local iface, peer = norm_name(qs.iface or ""), norm_name(qs.peer or "")
+  local key = (qs.public_key or ""):gsub("%s+", "")
+  if iface == "" or peer == "" or key == "" then return { ok=false, error="missing iface / peer / public key" } end
+  sh("uci -q delete network." .. peer .. " >/dev/null 2>&1")
+  uci_set("network." .. peer, "wireguard_peer")
+  uci_set("network." .. peer .. ".public_key", key)
+  if (qs.allowed_ip or "") ~= "" then sh("uci add_list network." .. peer .. ".allowed_ips=" .. shq(qs.allowed_ip) .. " >/dev/null 2>&1") end
+  if (qs.psk or "") ~= "" then uci_set("network." .. peer .. ".preshared_key", qs.psk) end
+  sh("uci add_list network." .. iface .. ".peers=" .. shq(peer) .. " >/dev/null 2>&1")
+  uci_commit("network")
+  sh("ubus call network reload 2>/dev/null")
+  return { ok=true, peer=peer }
+end
+
+function R.wireguard_del()
+  local name = norm_name(qs.name or "")
+  if name == "" then return { ok=false, error="missing name" } end
+  local net = uci_sections("network")
+  local s = net[name] or {}
+  if section_kind(name, s) == "interface" then
+    for pname in (s.peers or ""):gmatch("%S+") do
+      sh("uci -q delete network." .. pname .. " >/dev/null 2>&1")
+    end
+  end
+  sh("uci -q delete network." .. name .. " >/dev/null 2>&1")
+  uci_commit("network")
+  sh("ubus call network reload 2>/dev/null")
+  return { ok=true }
+end
+
+-- static routes (netifd) - the open-source equivalent of EdgeRouter's policy routes
+function R.routes()
+  local net = uci_sections("network")
+  local rows = {}
+  for _, n in ipairs(sorted_names(net)) do
+    local s = net[n]
+    if section_kind(n, s) == "route" then
+      rows[#rows + 1] = { section = n, interface = s.interface or "", target = s.target or "",
+                          gateway = s.gateway or "", metric = s.metric or "" }
+    end
+  end
+  local def = {}
+  for line in sh("ip route show table main 2>/dev/null"):gmatch("[^\n]+") do
+    if line:match("^default") then def[#def + 1] = trim(line) end
+  end
+  return { routes = rows, default_routes = def, policy = sh("command -v mwan3") ~= "" }
+end
+
+function R.route_add()
+  local iface, target, gw, metric = norm_name(qs.interface or ""), (qs.target or ""):gsub("%s+", ""),
+                                   (qs.gateway or ""):gsub("%s+", ""), (qs.metric or ""):gsub("%s+", "")
+  if iface == "" or target == "" then return { ok=false, error="missing interface / target" } end
+  sh("uci add network route >/dev/null 2>&1")
+  local count = tonumber(trim(sh("uci -q show network | grep -c '@route\\['"))) or 0
+  local sec = "@route[" .. (count - 1) .. "]"
+  uci_set("network." .. sec .. ".interface", iface)
+  uci_set("network." .. sec .. ".target", target)
+  if gw ~= "" then uci_set("network." .. sec .. ".gateway", gw) end
+  if metric ~= "" then uci_set("network." .. sec .. ".metric", metric) end
+  uci_commit("network")
+  sh("ubus call network reload 2>/dev/null")
+  return { ok=true, section=sec }
+end
+
+function R.route_del()
+  local sec = (qs.section or ""):gsub("%s+", "")
+  if sec == "" then return { ok=false, error="missing section" } end
+  sh("uci delete " .. shq("network." .. sec) .. " >/dev/null 2>&1")
+  uci_commit("network")
+  sh("ubus call network reload 2>/dev/null")
+  return { ok=true }
+end
+
 -- Remote WrtWeb access from the WAN side (hosts outside the LAN subnet)
 local REMOTE_RULE = "Allow-WrtWeb-WAN"
 local function find_remote_rule()
@@ -1141,52 +1424,6 @@ end
 
 -- Parse `uci -q show <cfg>` into { section = { key = value } }.
 -- Repeated list options are joined with a space.
-local function uci_sections(cfg)
-  local secs = {}
-  for line in sh("uci -q show " .. cfg):gmatch("[^\n]+") do
-    local rest = line:match("^" .. cfg .. "%.(.+)$")
-    if rest then
-      local sec, key, val = rest:match("^(.-)%.([%w_]+)=(.*)$")
-      if sec then
-        -- values are single-quoted; list values may hold several quoted items on one line
-        val = (val:gsub("'", ""):gsub('"', ""))
-        if not secs[sec] then secs[sec] = {} end
-        if secs[sec][key] then secs[sec][key] = secs[sec][key] .. " " .. val
-        else secs[sec][key] = val end
-      end
-    end
-  end
-  return secs
-end
-
-local UCI_TYPES = {
-  zone = true, rule = true, redirect = true, defaults = true,
-  forwarding = true, device = true, interface = true,
-}
-
-local function section_kind(name, s)
-  local base = (name:gsub("@", ""):gsub("%[", ""):gsub("%]", ""):lower():match("^(%a+)")) or ""
-  if UCI_TYPES[base] then return base end
-  -- named sections do not carry their type in `uci show`, so infer from the keys
-  if s.input or s.output or s.forward then return "zone" end
-  if s.dest_ip or s.src_dport then return "redirect" end
-  if s.src and s.target then return "rule" end
-  return base
-end
-
--- pairs() is unordered, so walk UCI sections in index order for stable output
-local function sorted_names(secs)
-  local names = {}
-  for n in pairs(secs) do names[#names + 1] = n end
-  local function idx(n) return tonumber(n:match("%[(%d+)%]")) or 10000 end
-  table.sort(names, function(a, b)
-    local ai, bi = idx(a), idx(b)
-    if ai ~= bi then return ai < bi end
-    return a < b
-  end)
-  return names
-end
-
 function R.firewall()
   local secs = uci_sections("firewall")
   local zones, rules, forwarding, defaults = {}, {}, {}, {}

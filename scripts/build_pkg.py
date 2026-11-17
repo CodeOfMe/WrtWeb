@@ -5,7 +5,7 @@ without the OpenWrt SDK. Outputs to dist/.
 import os, sys, tarfile, io, gzip, shutil, time, stat
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VER = "0.3.6"
+VER = "0.3.7"
 PKG = "wrtweb"
 DESC = "GL.iNet-style web admin panel for OpenWrt (repeater/hotspot/VPN/NAS/mirror/theme)"
 DIST = os.path.join(ROOT, "dist")
@@ -34,6 +34,8 @@ for f in os.listdir(os.path.join(ROOT, "files/usr/libexec/wrtweb")):
     add(os.path.join(ROOT, "files/usr/libexec/wrtweb", f), "/usr/libexec/wrtweb/" + f, 0o755)
 for f in os.listdir(os.path.join(ROOT, "files/etc/uci-defaults")):
     add(os.path.join(ROOT, "files/etc/uci-defaults", f), "/etc/uci-defaults/" + f, 0o755)
+for f in os.listdir(os.path.join(ROOT, "files/etc/init.d")):
+    add(os.path.join(ROOT, "files/etc/init.d", f), "/etc/init.d/" + f, 0o755)
 for f in os.listdir(os.path.join(ROOT, "files/usr/share/rpcd/acl.d")):
     add(os.path.join(ROOT, "files/usr/share/rpcd/acl.d", f), "/usr/share/rpcd/acl.d/" + f, 0o644)
 

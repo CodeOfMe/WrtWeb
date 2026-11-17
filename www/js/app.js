@@ -102,6 +102,7 @@
     { group: "internet", items: [
       { key: "overview", ic: "◎" },
       { key: "internet", ic: "🌐" },
+      { key: "repeater", ic: "📶" },
       { key: "hotspot", ic: "📡" },
       { key: "wan", ic: "⇄" },
       { key: "multiwan", ic: "⇉" },
@@ -294,20 +295,11 @@
   };
 
   VIEWS.internet = async function () {
-    const [ov, nets, ifc] = await Promise.all([apiGet("overview"), apiGet("repeater_scan"), apiGet("network")]);
-    const list = arr(nets.networks);
+    const [ov, ifc] = await Promise.all([apiGet("overview"), apiGet("network")]);
     const ifrows = arr(ifc.interfaces).map(i => `<tr><td>${esc(i.name)}</td>
       <td><span class="tag ${i.up ? "on" : "off"}">${esc(i.up ? t("on") : t("off"))}</span></td>
       <td>${esc(i.ip || "-")}</td></tr>`).join("");
-    let rows = list.length
-      ? list.map(n => `<div class="list-item">
-          <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
-            <div class="small muted">${esc(n.bssid || "")} · ${esc(n.encryption || "")} · ${esc(n.signal || "")} dBm</div></div>
-          <button class="ghost" data-join="${esc(n.ssid)}" data-bssid="${esc(n.bssid || "")}">${esc(t("connect"))}</button>
-        </div>`).join("")
-      : `<div class="muted">${esc(t("none"))}</div>`;
-
-    const html = wrap(`
+    return wrap(`
       <div class="card"><h2>${esc(t("internet", "nav"))} · ${esc(t("status"))}</h2>
         <div class="grid">
           ${stat(t("wan_ip"), ov.wan_ip || "-")}
@@ -316,44 +308,106 @@
         </div>
         <table><thead><tr><th>${esc(t("interfaces", "v"))}</th><th>${esc(t("status"))}</th><th>IP</th></tr></thead>
         <tbody>${ifrows || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
-      </div>
-      <div class="card"><h2>${esc(t("repeater_title", "v"))}</h2>
-        <p class="muted small">${esc(t("repeater_note", "v"))}</p>
-        <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/wireless")}</div>
-        <div id="net-list" style="margin-top:12px">${rows}</div>
+        <div class="btn-row">
+          <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/repeater">${esc(t("repeater", "nav"))} ›</a>
+          ${cfgBtn("/cgi-bin/luci/admin/network/wireless")}
+        </div>
+      </div>`);
+  };
+
+  VIEWS.repeater = async function () {
+    const [s, scan] = await Promise.all([apiGet("repeater_status"), apiGet("repeater_scan")]);
+    const c = s.config || {};
+    const up = s.uptime || 0;
+    const uh = Math.floor(up / 3600), um = Math.floor((up % 3600) / 60);
+    const state = s.connected ? t("connected", "v")
+      : (c.enabled === "1" ? t("not_associated", "v") : t("disabled"));
+    const radios = [];
+    const list = arr(scan.networks).map(n => `<div class="list-item">
+      <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
+        <div class="small muted">${esc(n.bssid || "")} · ${esc(n.encryption || "")} · ${esc(n.signal || "")} dBm</div></div>
+      <button class="ghost" data-join="${esc(n.ssid || "")}" data-enc="${esc(n.encryption || "")}"
+        data-bssid="${esc(n.bssid || "")}">${esc(t("connect"))}</button>
+    </div>`).join("");
+
+    return wrap(`
+      <div class="card"><h2>${esc(t("repeater", "nav"))}</h2>
+        <div class="grid">
+          ${stat(t("status"), state)}
+          ${stat(t("signal", "v"), s.signal ? s.signal + " dBm" : "-")}
+          ${stat(t("quality", "v"), s.quality || "-")}
+          ${stat(t("uptime"), s.uptime ? (uh ? uh + "h " : "") + um + "m" : "-")}
+          ${stat(t("uplink", "v"), s.net_up ? (s.net_ip || t("up", "v")) : t("down", "v"))}
+          ${stat(t("auto_reconnect", "v"), s.watch_running ? t("running") : t("stopped"))}
+        </div>
+        <p class="small muted">${s.iface ? esc(s.iface) + " · " + esc(s.radio || "-") : esc(t("no_sta_iface", "v"))}</p>
+        ${s.ap_same_radio ? `<p class="small muted">${esc(t("ap_sta_note", "v"))}</p>` : ""}
+        <div class="btn-row">
+          <button id="rp-reconnect">${esc(t("reconnect", "v"))}</button>
+          <button class="ghost" id="rp-stop">${esc(t("stop", "v"))}</button>
+          ${cfgBtn("/cgi-bin/luci/admin/network/wireless")}
+        </div>
       </div>
       <div class="card"><h2>${esc(t("join_manually", "v"))}</h2>
         <div class="row">
-          <div><label>${esc(t("ssid"))}</label><input id="j-ssid"></div>
-          <div><label>${esc(t("password"))}</label><input id="j-key" type="password"></div>
-          <div><label>${esc(t("encryption", "v"))}</label><select id="j-enc">
-            <option value="psk2">${esc(t("open_wpa2", "v"))}</option><option value="sae">${esc(t("open_wpa3", "v"))}</option>
-            <option value="psk-mixed">${esc(t("open_wpa_mixed", "v"))}</option><option value="none">${esc(t("open", "v"))}</option>
+          <div><label>${esc(t("ssid"))}</label><input id="rp-ssid" value="${esc(c.ssid || "")}"></div>
+          <div><label>${esc(t("password"))}</label><input id="rp-key" type="password" value="${esc(c.key || "")}"></div>
+          <div><label>${esc(t("encryption", "v"))}</label><select id="rp-enc">
+            ${["psk2","sae","psk-mixed","psk","none"].map(e => `<option ${c.encryption === e ? "selected" : ""} value="${e}">${e}</option>`).join("")}
+          </select></div>
+          <div><label>${esc(t("radio", "v"))}</label><input id="rp-radio" value="${esc(c.radio || "")}" placeholder="radio0"></div>
+          <div><label>${esc(t("pin_bssid", "v"))}</label><input id="rp-bssid" value="${esc(c.bssid || "")}" placeholder="${esc(t("optional", "v"))}"></div>
+          <div><label>${esc(t("auto_reconnect", "v"))}</label><select id="rp-auto">
+            <option value="1" ${c.auto !== "0" ? "selected" : ""}>${esc(t("on"))}</option>
+            <option value="0" ${c.auto === "0" ? "selected" : ""}>${esc(t("off"))}</option>
           </select></div>
         </div>
-        <div class="btn-row"><button id="do-join">${esc(t("connect"))}</button></div>
+        <div class="btn-row"><button id="rp-join">${esc(t("connect"))}</button></div>
+        <p class="small muted">${esc(t("repeater_page_note", "v"))}</p>
+      </div>
+      <div class="card"><h2>${esc(t("scan"))}</h2>
+        <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button></div>
+        <div id="net-list" style="margin-top:12px">${list || `<p class="muted">${esc(t("none"))}</p>`}</div>
       </div>`);
-    return html;
   };
-  VIEWS.internet.mount = function () {
-    const scan = $("#do-scan");
-    if (scan) scan.onclick = async () => { await render(); toast(t("scanning", "v")); };
-    document.querySelectorAll("[data-join]").forEach(b => {
-      b.onclick = async () => {
-        const ssid = b.getAttribute("data-join");
-        const key = prompt("Password for " + ssid + " (blank if open)") || "";
-        const enc = key ? "psk2" : "none";
-        const r = await apiPost("repeater_join", { ssid, key, encryption: enc, bssid: b.getAttribute("data-bssid") });
-        toast(r.ok ? t("connected_to", "v") + " " + ssid : t("failed", "v"), r.ok ? "ok" : "err");
-      };
-    });
-    const j = $("#do-join");
-    if (j) j.onclick = async () => {
-      const ssid = $("#j-ssid").value, key = $("#j-key").value, encryption = $("#j-enc").value;
+  VIEWS.repeater.mount = function () {
+    const join = async (ssid, enc, bssid) => {
       if (!ssid) return toast(t("ssid_required", "v"), "err");
-      const r = await apiPost("repeater_join", { ssid, key, encryption });
-      toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+      const r = await apiPost("repeater_join", {
+        ssid, key: $("#rp-key").value, encryption: enc,
+        radio: $("#rp-radio").value, bssid: bssid || "", auto: $("#rp-auto").value });
+      toast(r.ok ? (r.message || t("saved")) : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      if (r.ok) render();
     };
+    const doScan = $("#do-scan");
+    if (doScan) doScan.onclick = async () => {
+      $("#net-list").innerHTML = `<p class="muted">${esc(t("scanning", "v"))}</p>`;
+      const d = await apiGet("repeater_scan");
+      $("#net-list").innerHTML = arr(d.networks).map(n => `<div class="list-item">
+        <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
+          <div class="small muted">${esc(n.bssid || "")} · ${esc(n.encryption || "")} · ${esc(n.signal || "")} dBm</div></div>
+        <button class="ghost" data-join="${esc(n.ssid || "")}" data-enc="${esc(n.encryption || "")}"
+          data-bssid="${esc(n.bssid || "")}">${esc(t("connect"))}</button></div>`).join("")
+        || `<p class="muted">${esc(t("none"))}</p>`;
+      bind();
+    };
+    const act = async (action) => {
+      const r = await apiPost("repeater_action", { action });
+      toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      if (r.ok) render();
+    };
+    const j = $("#rp-join");
+    if (j) j.onclick = () => join($("#rp-ssid").value, $("#rp-enc").value, $("#rp-bssid").value);
+    const rec = $("#rp-reconnect");
+    if (rec) rec.onclick = () => act("reconnect");
+    const stop = $("#rp-stop");
+    if (stop) stop.onclick = () => act("stop");
+    function bind() {
+      document.querySelectorAll("[data-join]").forEach(b => {
+        b.onclick = () => join(b.getAttribute("data-join"), b.getAttribute("data-enc"), b.getAttribute("data-bssid"));
+      });
+    }
+    bind();
   };
 
   VIEWS.hotspot = async function () {
@@ -1252,14 +1306,120 @@
   };
 
   VIEWS.astrowarp = async function () {
-    return wrap(`<div class="card"><h2>${esc(t("astrowarp", "nav"))}</h2>
-      <p class="small muted">AstroWarp is a GL.iNet proprietary service and is not available as an open-source OpenWrt package.</p>
-    </div>`);
+    const d = await apiGet("wireguard");
+    const names = arr(d.interfaces).map(i => i.name);
+    const cards = arr(d.interfaces).map(i => {
+      const peers = arr(i.peers).map(p => `<tr>
+        <td>${esc(p.name)}</td><td class="small">${esc((p.public_key || "").slice(0, 16))}…</td>
+        <td>${esc(p.allowed_ips || "-")}</td><td>${esc(p.endpoint || "-")}</td>
+        <td>${p.handshake != null ? esc(p.handshake + "s") : esc(t("never", "v"))}</td>
+        <td class="small">${p.rx != null ? esc(human(p.rx) + " / " + human(p.tx)) : "-"}</td>
+        <td><button class="ghost" data-wgd="${esc(p.name)}">${esc(t("remove"))}</button></td></tr>`).join("");
+      return `<div class="card"><h2>${esc(i.name)}
+        <span class="tag ${i.running ? "on" : "off"}">${esc(i.running ? t("running") : t("stopped"))}</span></h2>
+        <div class="grid">
+          ${stat(t("public_key", "v"), i.public_key || "-")}
+          ${stat(t("listen_port", "v"), i.listen_port || "-")}
+          ${stat(t("addresses", "v"), i.addresses || "-")}
+        </div>
+        <table><thead><tr><th>${esc(t("peer", "v"))}</th><th>${esc(t("public_key", "v"))}</th>
+          <th>${esc(t("allowed_ips", "v"))}</th><th>${esc(t("endpoint", "v"))}</th>
+          <th>${esc(t("handshake", "v"))}</th><th>${esc(t("rate", "v"))}</th><th></th></tr></thead>
+        <tbody>${peers || `<tr><td colspan="7" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+        <div class="btn-row"><button class="ghost" data-wgd="${esc(i.name)}">${esc(t("remove_interface", "v"))}</button></div>
+      </div>`;
+    }).join("");
+
+    return wrap(`
+      <div class="card"><h2>${esc(t("astrowarp", "nav"))}</h2>
+        <p class="small muted">${esc(t("wg_note", "v"))}</p>
+        ${cards || `<p class="muted">${esc(t("none"))}</p>`}
+      </div>
+      <div class="card"><h2>${esc(t("new_interface", "v"))}</h2>
+        <div class="row">
+          <div><label>${esc(t("name"))}</label><input id="wg-name" value="wg0"></div>
+          <div><label>${esc(t("addresses", "v"))}</label><input id="wg-addr" placeholder="10.11.12.1/24"></div>
+          <div><label>${esc(t("listen_port", "v"))}</label><input id="wg-port" placeholder="51820"></div>
+        </div>
+        <div class="btn-row">
+          <button id="wg-new">${esc(t("generate", "v"))}</button>
+          ${d.tools ? "" : `<span class="muted small">${esc(t("requires_pkg", "v"))}: <code>wireguard-tools</code></span>`}
+        </div>
+        <p class="small muted" id="wg-key"></p>
+      </div>
+      <div class="card"><h2>${esc(t("add_peer", "v"))}</h2>
+        <div class="row">
+          <div><label>${esc(t("interface", "v"))}</label>
+            <select id="wg-if">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></div>
+          <div><label>${esc(t("peer", "v"))}</label><input id="wg-peer" placeholder="laptop"></div>
+          <div><label>${esc(t("public_key", "v"))}</label><input id="wg-key-in" placeholder="base64 key"></div>
+          <div><label>${esc(t("allowed_ips", "v"))}</label><input id="wg-ips" placeholder="10.11.12.2/32"></div>
+        </div>
+        <div class="btn-row"><button id="wg-add">${esc(t("add"))}</button></div>
+        <p class="small muted">${esc(t("wg_peer_note", "v"))}</p>
+      </div>`);
   };
+  VIEWS.astrowarp.mount = function () {
+    const run = async (res, body) => {
+      const r = await apiPost(res, body);
+      if (r.ok) {
+        if (r.public_key) $("#wg-key").textContent = "public key: " + r.public_key;
+        toast(t("saved")); render();
+      } else toast(r.error || t("failed", "v"), "err");
+    };
+    const gen = $("#wg-new");
+    if (gen) gen.onclick = () => run("wireguard_new", {
+      name: $("#wg-name").value, address: $("#wg-addr").value, port: $("#wg-port").value });
+    const add = $("#wg-add");
+    if (add) add.onclick = () => run("wireguard_peer", {
+      iface: $("#wg-if").value, peer: $("#wg-peer").value,
+      public_key: $("#wg-key-in").value, allowed_ip: $("#wg-ips").value });
+    document.querySelectorAll("[data-wgd]").forEach(b => {
+      b.onclick = () => run("wireguard_del", { name: b.getAttribute("data-wgd") });
+    });
+  };
+
   VIEWS.edgerouter = async function () {
-    return wrap(`<div class="card"><h2>${esc(t("edgerouter", "nav"))}</h2>
-      <p class="small muted">EdgeRouter is a GL.iNet proprietary feature and is not available as an open-source OpenWrt package.</p>
-    </div>`);
+    const d = await apiGet("routes");
+    const rows = arr(d.routes).map(r => `<tr>
+      <td>${esc(r.interface)}</td><td>${esc(r.target)}</td><td>${esc(r.gateway || "-")}</td>
+      <td>${esc(r.metric || "-")}</td>
+      <td><button class="ghost" data-rdel="${esc(r.section)}">${esc(t("remove"))}</button></td></tr>`).join("");
+    const defs = arr(d.default_routes).map(r => `<div class="list-item"><div class="grow"><code>${esc(r)}</code></div></div>`).join("");
+    return wrap(`
+      <div class="card"><h2>${esc(t("edgerouter", "nav"))}</h2>
+        <p class="small muted">${esc(t("route_note", "v"))}</p>
+        <table><thead><tr><th>${esc(t("interface", "v"))}</th><th>${esc(t("destination", "v"))}</th>
+          <th>${esc(t("gateway", "v"))}</th><th>${esc(t("metric", "v"))}</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+        <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/routes")}</div>
+      </div>
+      <div class="card"><h2>${esc(t("default_routes", "v"))}</h2>
+        ${defs || `<p class="muted">${esc(t("none"))}</p>`}
+        ${d.policy ? `<p class="small muted">${esc(t("policy_note", "v"))}</p>` : ""}
+      </div>
+      <div class="card"><h2>${esc(t("add_route", "v"))}</h2>
+        <div class="row">
+          <div><label>${esc(t("interface", "v"))}</label><input id="r-if" placeholder="wan"></div>
+          <div><label>${esc(t("destination", "v"))}</label><input id="r-target" placeholder="10.20.0.0/24"></div>
+          <div><label>${esc(t("gateway", "v"))}</label><input id="r-gw" placeholder="192.168.1.1"></div>
+          <div><label>${esc(t("metric", "v"))}</label><input id="r-metric" placeholder="10"></div>
+        </div>
+        <div class="btn-row"><button id="r-add">${esc(t("add"))}</button></div>
+      </div>`);
+  };
+  VIEWS.edgerouter.mount = function () {
+    const run = async (res, body) => {
+      const r = await apiPost(res, body);
+      if (r.ok) { toast(t("saved")); render(); } else toast(r.error || t("failed", "v"), "err");
+    };
+    const add = $("#r-add");
+    if (add) add.onclick = () => run("route_add", {
+      interface: $("#r-if").value, target: $("#r-target").value,
+      gateway: $("#r-gw").value, metric: $("#r-metric").value });
+    document.querySelectorAll("[data-rdel]").forEach(b => {
+      b.onclick = () => run("route_del", { section: b.getAttribute("data-rdel") });
+    });
   };
 
   /* ---------------- router ---------------- */

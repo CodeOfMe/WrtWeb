@@ -4,7 +4,8 @@ window.I18N = {
     groups: { internet:"Internet", clients:"Clients", vpn:"VPN", apps:"Applications",
               network:"Network", system:"System" },
     nav: {
-      overview:"Overview", internet:"Internet", wan:"WAN", multiwan:"Multi-WAN",
+      overview:"Overview", internet:"Internet", repeater:"Wireless Repeater",
+      wan:"WAN", multiwan:"Multi-WAN",
       hotspot:"Hotspot Sharing",
       clients:"Clients",
       vpn:"VPN Dashboard", wgclient:"WireGuard Client", wgserver:"WireGuard Server",
@@ -119,14 +120,29 @@ window.I18N = {
       addresses:"Addresses", interfaces:"Interfaces", channel:"Channel",
       listen_port:"Listen port", public_key:"Public key", unknown:"Unknown", disconnect:"Disconnect",
       wg_server_hint:"The listen port and public key come from `wg show` for each WireGuard interface.",
-      ovpn_server_hint:"Server profiles live in /etc/openvpn; a client imports the .ovpn file to connect."
+      ovpn_server_hint:"Server profiles live in /etc/openvpn; a client imports the .ovpn file to connect.",
+      quality:"Quality", uplink:"Uplink", auto_reconnect:"Auto-reconnect", reconnect:"Reconnect",
+      connected:"Connected", not_associated:"Not associated", pin_bssid:"Pin BSSID", radio:"Radio",
+      no_sta_iface:"No station interface configured",
+      ap_sta_note:"AP and station on the same radio need driver support (AP+STA); use a second radio if the link flaps.",
+      repeater_page_note:"Join one upstream Wi-Fi as a station; the local access point keeps broadcasting. A watchdog re-associates when the link drops.",
+      up:"Up", down:"Down", peer:"Peer", new_interface:"New interface", generate:"Generate key",
+      never:"Never", allowed_ips:"Allowed IPs", endpoint:"Endpoint", handshake:"Handshake",
+      remove_interface:"Delete interface",
+      route_note:"Static routes are netifd UCI routes - the open-source equivalent of the policy routes here.",
+      default_routes:"Default routes", add_route:"Add route", destination:"Destination", metric:"Metric",
+      policy_note:"mwan3 is installed, so policy-based routing is applied on top of these routes.",
+      add_peer:"Add peer", optional:"optional",
+      wg_note:"AstroWarp is the open-source WireGuard stack (netifd's wireguard proto): create an interface, add peers by public key.",
+      wg_peer_note:"Paste the peer's own public key - the peer keeps its private key. netifd applies the change on save."
     }
   },
   zh: {
     groups: { internet:"互联网", clients:"客户端", vpn:"VPN", apps:"应用",
               network:"网络", system:"系统" },
     nav: {
-      overview:"概览", internet:"互联网", wan:"WAN", multiwan:"多WAN",
+      overview:"概览", internet:"互联网", repeater:"无线中继",
+      wan:"WAN", multiwan:"多WAN",
       hotspot:"热点分享",
       clients:"客户端",
       vpn:"VPN 面板", wgclient:"WireGuard 客户端", wgserver:"WireGuard 服务端",
@@ -241,7 +257,21 @@ window.I18N = {
       addresses:"地址", interfaces:"接口", channel:"信道",
       listen_port:"监听端口", public_key:"公钥", unknown:"未知", disconnect:"断开",
       wg_server_hint:"每个 WireGuard 接口的监听端口与公钥来自 `wg show`。",
-      ovpn_server_hint:"服务端配置位于 /etc/openvpn，客户端导入 .ovpn 文件即可连接。"
+      ovpn_server_hint:"服务端配置位于 /etc/openvpn，客户端导入 .ovpn 文件即可连接。",
+      quality:"链路质量", uplink:"上行链路", auto_reconnect:"自动重连", reconnect:"重新连接",
+      connected:"已连接", not_associated:"未关联", pin_bssid:"锁定 BSSID", radio:"射频",
+      no_sta_iface:"未配置客户端接口",
+      ap_sta_note:"同一射频上同时作为 AP 与客户端需要驱动支持（AP+STA）；链路不稳请改用第二个射频。",
+      repeater_page_note:"接入一个上游 Wi-Fi 作为客户端，本地热点继续广播；链路断开时看门狗会自动重连。",
+      up:"在线", down:"离线", peer:"对端", new_interface:"新建接口", generate:"生成密钥",
+      never:"从未", allowed_ips:"允许 IP", endpoint:"端点", handshake:"握手",
+      remove_interface:"删除接口",
+      route_note:"静态路由就是 netifd 的 UCI 路由，即策略路由的开源实现。",
+      default_routes:"默认路由", add_route:"添加路由", destination:"目标网段", metric:"度量值",
+      policy_note:"已安装 mwan3，策略路由会在这些路由之上生效。",
+      add_peer:"添加对端", optional:"可选",
+      wg_note:"AstroWarp 即开源的 WireGuard（netifd 的 wireguard 协议）：新建接口，按公钥添加对端。",
+      wg_peer_note:"粘贴对端自己的公钥，对端保留它的私钥；保存后由 netifd 应用。"
     }
   }
 };
