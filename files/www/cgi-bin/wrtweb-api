@@ -17,6 +17,15 @@ local function sh(cmd)
   return out
 end
 
+-- same as sh() but keeps stderr, so package managers can report a stale index
+local function sh_err(cmd)
+  local p = io.popen(cmd .. " 2>&1")
+  if not p then return "" end
+  local out = p:read("*a") or ""
+  p:close()
+  return out
+end
+
 local function trim(s)
   local r = (s or ""):gsub("^%s+",""):gsub("%s+$","")
   return r
@@ -217,28 +226,82 @@ end
 
 -- clients list with connection method, band, signal and rates
 function R.clients()
-  local wifi = {}
-  local iface_band = {}
-  for ifn in sh("iw dev 2>/dev/null"):gmatch("Interface (%S+)") do
-    local info = sh("iw dev "..ifn.." info 2>/dev/null")
-    local ch = tonumber(info:match("channel%s+(%d+)")) or 0
-    iface_band[ifn] = (ch > 0 and ch <= 14 and "2.4g") or (ch >= 32 and "5g") or ""
-    local cur
-    for line in sh("iw dev "..ifn.." station dump 2>/dev/null"):gmatch("[^\n]+") do
+  -- wireless interfaces: band, channel, width, tx power
+  local iface_info, cur = {}, nil
+  for line in sh("iw dev 2>/dev/null"):gmatch("[^\n]+") do
+    local ifn = line:match("Interface (%S+)")
+    if ifn then
+      cur = ifn
+      iface_info[ifn] = { iface = ifn, band = "", channel = 0, width = "", txpower = "" }
+    end
+    if cur then
+      local ch, freq, width = line:match("channel (%d+) %((%d+) MHz%), width: (%S+)")
+      if ch then
+        local f = tonumber(freq) or 0
+        iface_info[cur].band = (f >= 6000 and "6 GHz") or (f >= 4800 and "5 GHz") or "2.4 GHz"
+        iface_info[cur].channel = tonumber(ch) or 0
+        iface_info[cur].width = width or ""
+      end
+      local txp = line:match("txpower (%S+) dBm")
+      if txp then iface_info[cur].txpower = txp end
+    end
+  end
+
+  local stations = {}
+  for ifn in pairs(iface_info) do
+    local cursta
+    for line in sh("iw dev " .. ifn .. " station dump 2>/dev/null"):gmatch("[^\n]+") do
       local mac = line:match("Station (%x%x:[%x:]+)%s*%(on")
       if mac then
-        cur = { mac=mac:lower(), iface=ifn }
-        wifi[cur.mac] = cur
-      elseif cur then
+        cursta = { mac = mac:lower(), iface = ifn }
+        stations[cursta.mac] = cursta
+      elseif cursta then
         local s = line:match("signal:%s*(%-?%d+)")
-        if s then cur.signal = tonumber(s) end
+        if s then cursta.signal = tonumber(s) end
         local tx = line:match("tx bitrate:%s*([%d%.]+) MBit/s")
-        if tx then cur.tx = tonumber(tx) end
+        if tx then cursta.tx = tonumber(tx) end
         local rx = line:match("rx bitrate:%s*([%d%.]+) MBit/s")
-        if rx then cur.rx = tonumber(rx) end
+        if rx then cursta.rx = tonumber(rx) end
         local ct = line:match("connected time:%s*(%d+)")
-        if ct then cur.connected = tonumber(ct) end
+        if ct then cursta.connected = tonumber(ct) end
       end
+    end
+  end
+
+  -- bridge forwarding table: which port each MAC was learned on
+  local devmac, devname = {}, nil
+  for line in sh("ip -d link show 2>/dev/null"):gmatch("[^\n]+") do
+    local _, nm = line:match("^(%d+): ([^%s:]+)")
+    if nm then devname = nm end
+    local mac = line:match("link/ether (%S+)")
+    if mac and devname and not devmac[mac:lower()] then devmac[mac:lower()] = devname end
+  end
+  local rows, portname, fdb = {}, {}, {}
+  for line in sh("brctl showmacs br-lan 2>/dev/null"):gmatch("[^\n]+") do
+    local pn, mac, flag = line:match("^%s*(%d+)%s+(%S+)%s+(%a+)")
+    if pn and mac then rows[#rows + 1] = { pn = pn, mac = mac:lower(), flag = flag } end
+  end
+  for _, r in ipairs(rows) do
+    if r.flag == "yes" then portname[r.pn] = devmac[r.mac] or ("port " .. r.pn) end
+  end
+  for _, r in ipairs(rows) do
+    if r.flag == "no" then fdb[r.mac] = portname[r.pn] or ("port " .. r.pn) end
+  end
+
+  -- traffic per address from the conntrack table
+  local traffic = {}
+  for line in sh("cat /proc/net/nf_conntrack 2>/dev/null"):gmatch("[^\n]+") do
+    local pair = {}
+    for s, b in line:gmatch("src=(%S+)%s-.-bytes=(%d+)") do
+      pair[#pair + 1] = { s, tonumber(b) or 0 }
+    end
+    if #pair == 2 then
+      for _, p in ipairs(pair) do
+        if not traffic[p[1]] then traffic[p[1]] = { up = 0, down = 0, conns = 0 } end
+        traffic[p[1]].conns = traffic[p[1]].conns + 1
+      end
+      traffic[pair[1][1]].up = traffic[pair[1][1]].up + pair[1][2]
+      traffic[pair[2][1]].down = traffic[pair[2][1]].down + pair[2][2]
     end
   end
 
@@ -247,8 +310,8 @@ function R.clients()
     mac = mac:lower()
     local c = bymac[mac]
     if not c then
-      c = { mac=mac, ip=ip, name=name, online=online }
-      bymac[mac] = c; list[#list+1] = c
+      c = { mac = mac, ip = ip, name = name, online = online }
+      bymac[mac] = c; list[#list + 1] = c
     else
       if ip ~= "" and (c.ip or "") == "" then c.ip = ip end
       if name ~= "" and (c.name or "") == "" then c.name = name end
@@ -261,28 +324,45 @@ function R.clients()
     local exp, mac, ip, host = line:match("(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
     if mac then add(mac, ip, (host == "*" and "" or host), true) end
   end
-  for ip, dev, mac in sh("ip neigh 2>/dev/null"):gmatch("(%d+%.%d+%.%d+%.%d+)%s+dev%s+(%S+)%s+lladdr%s+(%x%x:[%x:]+)") do
+  local neigh = {}
+  for ip, dev, mac, st in sh("ip neigh show 2>/dev/null"):gmatch("(%d+%.%d+%.%d+%.%d+)%s+dev%s+([%w%-]+)%s+lladdr%s+([%x:]+)%s+([A-Z]+)") do
     if dev:match("^br%-") or dev:match("^phy") or dev:match("^wlan") then
-      add(mac, ip, "", true)
+      neigh[ip] = { state = st, dev = dev }
+      add(mac, ip, "", st ~= "FAILED")
     end
   end
 
+  local wifi_n, wired_n = 0, 0
   for _, c in ipairs(list) do
-    local w = wifi[c.mac]
+    local w = stations[c.mac]
     if w then
-      c.method = "wifi"; c.iface = w.iface; c.band = iface_band[w.iface] or ""
-      c.signal = w.signal; c.tx = w.tx; c.rx = w.rx; c.connected = w.connected; c.online = true
+      local info = iface_info[w.iface] or {}
+      c.method = "wifi"; c.iface = w.iface
+      c.band = info.band or ""; c.channel = info.channel or 0; c.width = info.width or ""
+      c.signal = w.signal; c.tx = w.tx; c.rx = w.rx; c.connected = w.connected
+      c.online = true
     else
       c.method = "wired"
+      local p = fdb[c.mac]
+      if p then
+        c.port = p
+        c.speed = trim(sh("cat /sys/class/net/" .. p .. "/speed 2>/dev/null"))
+        c.duplex = trim(sh("cat /sys/class/net/" .. p .. "/duplex 2>/dev/null"))
+        c.carrier = trim(sh("cat /sys/class/net/" .. p .. "/carrier 2>/dev/null"))
+      end
     end
-  end
-  for mac, w in pairs(wifi) do
-    if not bymac[mac] then
-      list[#list+1] = { mac=mac, ip="", name="", online=true, method="wifi",
-        iface=w.iface, band=iface_band[w.iface] or "", signal=w.signal, tx=w.tx, rx=w.rx, connected=w.connected }
+    if c.signal then
+      c.quality = (c.signal >= -50 and "excellent") or (c.signal >= -60 and "good")
+        or (c.signal >= -70 and "fair") or "weak"
     end
+    if c.ip then
+      c.traffic = traffic[c.ip]
+      if neigh[c.ip] then c.state = neigh[c.ip].state end
+    end
+    if c.method == "wifi" then wifi_n = wifi_n + 1 elseif c.method == "wired" then wired_n = wired_n + 1 end
   end
-  return { clients=list }
+
+  return { clients = list, total = #list, wifi = wifi_n, wired = wired_n }
 end
 
 -- wireless radios + ssids
@@ -770,9 +850,11 @@ end
 
 -- ZeroTier status / join
 function R.zerotier()
+  local info = sh("zerotier-cli info 2>/dev/null")
   return {
     installed = trim(sh("command -v zerotier-cli")) ~= "",
-    info = sh("zerotier-cli info 2>/dev/null"),
+    running = info ~= "",
+    info = info,
     networks = sh("zerotier-cli listnetworks 2>/dev/null"),
   }
 end
@@ -810,7 +892,7 @@ function R.ovpn()
   return { files = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null")) }
 end
 
--- Remote WrtWeb access from the WAN side (e.g. hosts on 192.168.100.0/24)
+-- Remote WrtWeb access from the WAN side (hosts outside the LAN subnet)
 local REMOTE_RULE = "Allow-WrtWeb-WAN"
 local function find_remote_rule()
   for sec, name in sh("uci show firewall 2>/dev/null"):gmatch("firewall%.([^%.]+)%.name='([^']*)'") do
@@ -992,10 +1074,6 @@ function R.reboot()
   return { ok=true }
 end
 
-function R.backup()
-  return { note = "use /cgi-bin/wrtweb-api?c=backup_download" }
-end
-
 function R.plugins()
   local pkgs = {}
   local raw = sh("apk list --installed 2>/dev/null || opkg list-installed 2>/dev/null")
@@ -1026,19 +1104,29 @@ end
 local function uci_sections(cfg)
   local secs = {}
   for line in sh("uci -q show " .. cfg):gmatch("[^\n]+") do
-    local sec, key, val = line:match("^" .. cfg .. "%.([^%.]+)%.(%w+)='?([^']*)'?$")
-    if sec then
-      if not secs[sec] then secs[sec] = {} end
-      if secs[sec][key] then secs[sec][key] = secs[sec][key] .. " " .. val
-      else secs[sec][key] = val end
+    local rest = line:match("^" .. cfg .. "%.(.+)$")
+    if rest then
+      local sec, key, val = rest:match("^(.-)%.([%w_]+)=(.*)$")
+      if sec then
+        -- values are single-quoted; list values may hold several quoted items on one line
+        val = (val:gsub("'", ""):gsub('"', ""))
+        if not secs[sec] then secs[sec] = {} end
+        if secs[sec][key] then secs[sec][key] = secs[sec][key] .. " " .. val
+        else secs[sec][key] = val end
+      end
     end
   end
   return secs
 end
 
+local UCI_TYPES = {
+  zone = true, rule = true, redirect = true, defaults = true,
+  forwarding = true, device = true, interface = true,
+}
+
 local function section_kind(name, s)
   local base = (name:gsub("@", ""):gsub("%[", ""):gsub("%]", ""):lower():match("^(%a+)")) or ""
-  if base == "rule" or base == "redirect" or base == "zone" then return base end
+  if UCI_TYPES[base] then return base end
   -- named sections do not carry their type in `uci show`, so infer from the keys
   if s.input or s.output or s.forward then return "zone" end
   if s.dest_ip or s.src_dport then return "redirect" end
@@ -1050,17 +1138,18 @@ end
 local function sorted_names(secs)
   local names = {}
   for n in pairs(secs) do names[#names + 1] = n end
+  local function idx(n) return tonumber(n:match("%[(%d+)%]")) or 10000 end
   table.sort(names, function(a, b)
-    local ai = tonumber(a:match("%[(%d+)%]") or a:match("(%d+)") or 0)
-    local bi = tonumber(b:match("%[(%d+)%]") or b:match("(%d+)") or 0)
-    return ai < bi
+    local ai, bi = idx(a), idx(b)
+    if ai ~= bi then return ai < bi end
+    return a < b
   end)
   return names
 end
 
 function R.firewall()
   local secs = uci_sections("firewall")
-  local zones, rules = {}, {}
+  local zones, rules, forwarding, defaults = {}, {}, {}, {}
   for _, name in ipairs(sorted_names(secs)) do
     local s = secs[name]
     local k = section_kind(name, s)
@@ -1075,24 +1164,42 @@ function R.firewall()
         dest_port = s.dest_port or "", src_mac = s.src_mac or "",
         proto = s.proto or "", target = s.target or "ACCEPT",
       }
+    elseif k == "forwarding" then
+      forwarding[#forwarding + 1] = { src = s.src or "", dest = s.dest or "" }
+    elseif k == "defaults" then
+      defaults = {
+        input = s.input or "", output = s.output or "", forward = s.forward or "",
+        syn_flood = s.syn_flood or "",
+      }
     end
   end
-  return { zones = zones, rules = rules }
+  return { zones = zones, rules = rules, forwarding = forwarding, defaults = defaults,
+           rule_count = #rules }
 end
 
 function R.vlan()
   local secs = uci_sections("network")
-  local devs = {}
+  local devs, vlans = {}, {}
   for _, name in ipairs(sorted_names(secs)) do
     local s = secs[name]
     if s.type == "bridge" or s.type == "dsa" then
       devs[#devs + 1] = { name = s.name or name, type = s.type, ports = s.ports or "" }
+    elseif s.type == "bridge-vlan" then
+      vlans[#vlans + 1] = {
+        name = s.name or ("vlan " .. (s.vid or "")), vid = tonumber(s.vid) or 0,
+        ports = s.ports or "", aliases = s.aliases or "",
+      }
     end
   end
-  local vlans = {}
+  -- kernel 802.1Q devices that are not described in UCI
+  local current
   for line in sh("ip -d link show 2>/dev/null"):gmatch("[^\n]+") do
-    local nm, vid = line:match("^(%S+):.*vlan.*vid (%d+)")
-    if nm then vlans[#vlans + 1] = { name = nm, vid = tonumber(vid) } end
+    local _, nm = line:match("^(%d+): ([^%s:]+)")
+    if nm then current = nm end
+    local vid = line:match("protocol 802.1Q id (%d+)") or line:match("vlan .*vid (%d+)")
+    if current and vid then
+      vlans[#vlans + 1] = { name = current, vid = tonumber(vid), ports = "", aliases = "" }
+    end
   end
   return { devices = devs, vlans = vlans }
 end
@@ -1102,15 +1209,27 @@ function R.security()
   local locked = (hash == "") or (hash:match("^[*!]") ~= nil)
   local ports = {}
   for line in sh("netstat -tln 2>/dev/null"):gmatch("[^\n]+") do
-    local addr, port = line:match("^(%S+):(%d+)")
-    if port then ports[#ports + 1] = { addr = addr, port = tonumber(port) } end
+    local f = {}
+    for w in line:gmatch("%S+") do f[#f + 1] = w end
+    if f[1] == "tcp" and f[4] then
+      local addr, port = f[4]:match("^(.-):(%d+)$")
+      if port then ports[#ports + 1] = { addr = addr, port = tonumber(port) } end
+    end
   end
+  table.sort(ports, function(a, b) return (a.port or 0) < (b.port or 0) end)
+  local https_on = false
+  for _, p in ipairs(ports) do if p.port == 443 then https_on = true end end
   local db = uci_sections("dropbear")
   local inst = {}
   for _, name in ipairs(sorted_names(db)) do
+    local s = db[name]
     inst[#inst + 1] = {
-      interface = db[name].Interface or db[name].interface or "all",
-      port = db[name].Port or db[name].port or "22",
+      name = name,
+      interface = s.Interface or s.interface or "all",
+      port = s.Port or s.port or "22",
+      enabled = s.enable or s.Enabled or "1",
+      password_auth = s.PasswordAuth or s.password_auth or "",
+      root_auth = s.RootPasswordAuth or s.root_password_auth or "",
     }
   end
   return {
@@ -1119,25 +1238,38 @@ function R.security()
     listening = ports,
     ssh_wan = R.remote_ssh().enabled,
     web_wan = R.remote_access().enabled,
-    https = trim(sh("uci -q get uhttpd.main.https")) == "1",
+    https = https_on or trim(sh("uci -q get uhttpd.main.https")) == "1",
   }
 end
 
 function R.upgrades()
-  local raw = sh("apk list --upgradeable 2>/dev/null || opkg list-upgradable 2>/dev/null")
-  local up = {}
+  local tool = (trim(sh("command -v apk")) ~= "" and "apk") or (trim(sh("command -v opkg")) ~= "" and "opkg") or ""
+  local raw = (tool == "apk" and sh_err("apk list --upgradeable"))
+          or (tool == "opkg" and sh_err("opkg list-upgradable")) or ""
+  local up, stale = {}, false
   for line in raw:gmatch("[^\n]+") do
-    local name = line:match("^(%S+) %S+") or line:match("^(%S+)")
-    if name then
-      up[#up + 1] = { name = name, to = line:match("%->%s*(%S+)") or "" }
+    if line:match("WARNING") or line:match("No such file") then
+      stale = true
+    else
+      local name = line:match("^(%S+)")
+      local to = line:match("%->%s*(%S+)") or line:match("(%S+)%s*$")
+      if name and to and name ~= to then
+        up[#up + 1] = { name = name, to = to }
+      end
     end
   end
   return {
-    upgradable = up, count = #up,
-    pkgtool = (trim(sh("command -v apk")) ~= "" and "apk") or (trim(sh("command -v opkg")) ~= "" and "opkg") or "",
+    upgradable = up, count = #up, pkgtool = tool, stale = stale,
     attended = trim(sh("command -v attendedsysupgrade-cli")) ~= "",
     verify = trim(sh("uci -q get attendedsysupgrade.common.verify")) == "1",
   }
+end
+
+-- Update the package index (the Upgrade page calls this from a button)
+function R.upgrades_refresh()
+  local tool = (trim(sh("command -v apk")) ~= "" and "apk") or (trim(sh("command -v opkg")) ~= "" and "opkg") or ""
+  if tool == "" then return { ok = false, error = "no package manager" } end
+  return { ok = true, tool = tool, output = sh_err(tool .. " update") }
 end
 
 function R.backup()
@@ -1168,6 +1300,82 @@ function R.backup_download()
   io.write("Content-Disposition: attachment; filename=\"" .. path:match("[^/]+$") .. "\"\r\n")
   io.write("Content-Length: " .. #data .. "\r\n\r\n")
   io.write(data)
+end
+
+local function proc_num(path)
+  return trim(sh("cat " .. path .. " 2>/dev/null"))
+end
+
+function R.ipv6()
+  local iface = {}
+  for name in sh("ubus list 'network.interface.*'"):gmatch("network%.interface%.([%w_]+)") do
+    local st = sh("ubus call network.interface." .. name .. " status")
+    local v6 = {}
+    for a in st:gmatch('"address":%s*"([^"]+)"') do
+      if a:match(":") then v6[#v6 + 1] = a end
+    end
+    iface[#iface + 1] = {
+      name = name, up = (st:match('"up":%s*true') ~= nil),
+      proto = st:match('"proto":%s*"([^"]+)"') or "",
+      addr = table.concat(v6, " "),
+    }
+  end
+  local dn = uci_sections("dhcp")["@dnsmasq[0]"] or {}
+  return {
+    interfaces = iface,
+    ula = uci_get("network", "globals", "ula_prefix"),
+    filter_aaaa = dn.filter_aaaa or "0",
+    nameservers = sh("cat /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null || cat /tmp/resolv.conf 2>/dev/null"),
+  }
+end
+
+function R.advanced()
+  local sys = uci_sections("system")
+  local s0 = sys["@system[0]"] or {}
+  local dn = uci_sections("dhcp")["@dnsmasq[0]"] or {}
+  local g = uci_sections("network")["globals"] or {}
+  local swap_rows = 0
+  for _ in sh("cat /proc/swaps 2>/dev/null"):gmatch("[^\n]+") do swap_rows = swap_rows + 1 end
+  return {
+    system = {
+      hostname = s0.hostname or "", timezone = s0.timezone or "", zonename = s0.zonename or "",
+      log_size = s0.log_size or "", log_proto = s0.log_proto or "",
+      conloglevel = s0.conloglevel or "", cronloglevel = s0.cronloglevel or "",
+      ttylogin = s0.ttylogin or "0",
+    },
+    ntp = (sys["ntp"] or {}).server or "",
+    dns = {
+      domain = dn.domain or "", cachesize = dn.cachesize or "",
+      rebind = dn.rebind_protection or "", expandhosts = dn.expandhosts or "",
+      filter_aaaa = dn.filter_aaaa or "", localnet = dn["local"] or "",
+    },
+    globals = { ula_prefix = g.ula_prefix or "", irqmode = g.irqmode or "" },
+    sysctl = {
+      swappiness = proc_num("/proc/sys/vm/swappiness"),
+      netdev_budget = proc_num("/proc/sys/net/core/netdev_budget"),
+      backlog = proc_num("/proc/sys/net/core/netdev_max_backlog"),
+    },
+    swap = swap_rows > 1,
+    irqbalance = trim(sh("command -v irqbalance")) ~= "",
+    load = proc_num("/proc/loadavg"),
+  }
+end
+
+-- Ping diagnostics (Advanced page)
+function R.diagnostics()
+  local target = (qs.host or "")
+  if target == "" then target = sh("ip route 2>/dev/null"):match("default via (%S+)") or "" end
+  target = (target or ""):gsub("[^%w%.:%-]", "")
+  if target == "" then return { ok = false, error = "no target" } end
+  local out = sh_err("ping -c 3 -W 3 " .. shq(target))
+  local tx, rx, loss = out:match("(%d+) packets transmitted, (%d+) packets received, (%d+)%% packet loss")
+  local mn, av, mx = out:match("min/avg/max = ([%d%.]+)/([%d%.]+)/([%d%.]+)")
+  return {
+    ok = true, host = target,
+    transmitted = tonumber(tx) or 0, received = tonumber(rx) or 0,
+    loss = tonumber(loss) or 100,
+    min = tonumber(mn) or 0, avg = tonumber(av) or 0, max = tonumber(mx) or 0,
+  }
 end
 
 -- Parental control: one firewall rule per device MAC.
@@ -1244,6 +1452,7 @@ end
 local ok, res = pcall(handler)
 if not ok then
   out({ ok=false, error=tostring(res) })
-else
+elseif res ~= nil then
+  -- handlers that stream their own body (e.g. backup_download) return nil
   out(res)
 end

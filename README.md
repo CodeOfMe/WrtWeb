@@ -27,19 +27,24 @@ Open it at `https://<router>/wrtweb/` or from LuCI → **WrtWeb**.
 - **Repeater / Client mode**: scans real nearby SSIDs and joins one as a `sta`
   uplink (re-broadcast on LAN) — this is the core GL "Internet" feature
 - **USB modem uplink** (QMI / MBIM / NCM / PPP) via `usbmodem.sh`
-- **Clients** list (DHCP leases + `iw station dump`)
+- **Clients** list: connection type (Wi-Fi band/channel/width, or the switch port with link
+  speed), signal level and quality, negotiated rx/tx rate, per-device traffic from the
+  conntrack table, neighbour state
 - **Wireless** SSID/key/encryption editing per radio
 - **LAN** IP / DHCP editing, **Guest Wi-Fi** (isolated SSID + zone)
 - **Port forwarding** (list/add/delete firewall redirects)
 - **AdGuard Home** status + start/stop, **NAS/Samba** toggle
 - **Dynamic DNS** listing, **VPN** status (WireGuard/OpenVPN detection)
 - **Plugins** (installed package list), **Logs**, **Timezone/hostname**, **Reboot**
-- **Firewall** zones + rules read live from UCI (fw4), **VLAN** devices / 802.1Q IDs
+- **Firewall** zones, rules and default policies read live from UCI (fw4), **VLAN** devices / 802.1Q IDs
 - **Parental Control**: one firewall rule per device MAC — block / unblock from the UI
 - **Security**: root password state, dropbear interfaces, listening TCP ports,
   SSH/Web-from-WAN flags
 - **Backup / Restore**: builds the sysupgrade archive (`sysupgrade -b`) and serves it
-  as a download; **Upgrade** lists what the package manager says is upgradable
+  as a download
+- **Upgrade** lists what the package manager says is upgradable and can refresh the index
+- **Advanced** shows real system / DNS / sysctl values with a ping test, **IPv6** shows the
+  real addresses per interface and the ULA prefix
 - English + 简体中文 UI switch
 
 Screens whose daemons may be absent (Tor, Tailscale, ZeroTier, multi-WAN, IPv6)

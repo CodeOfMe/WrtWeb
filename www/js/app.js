@@ -69,6 +69,14 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  const fmtB = (n) => {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KiB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MiB";
+    return (n / 1073741824).toFixed(1) + " GiB";
+  };
+
   function toast(msg, kind) {
     let el = document.createElement("div");
     el.className = "toast " + (kind || "ok");
@@ -83,7 +91,7 @@
   }
 
   function stat(k, v, small, href) {
-    const inner = `<div class="k">${esc(k)}</div><div class="v ${small ? "sm" : ""}">${esc(v || "-")}</div>`;
+    const inner = `<div class="k">${esc(k)}</div><div class="v ${small ? "sm" : ""}">${esc(v === "" || v == null ? "-" : String(v))}</div>`;
     return href
       ? `<a class="stat stat-link" href="#/${href}">${inner}<span class="go">›</span></a>`
       : `<div class="stat">${inner}</div>`;
@@ -433,16 +441,18 @@
     const d = await apiGet("clients");
     const sigTag = (s) => {
       if (s == null) return "-";
-      const cls = s >= -60 ? "on" : (s >= -75 ? "" : "off");
+      const cls = (s >= -60 ? "on" : (s >= -75 ? "" : "off"));
       return `<span class="tag ${cls}">${s} dBm</span>`;
     };
     const rows = arr(d.clients).map(c => {
       let conn;
       if (c.method === "wifi") {
-        const band = c.band === "5g" ? t("band_5g", "v") : (c.band === "2.4g" ? t("band_2g", "v") : "");
-        conn = `<span class="tag">${esc(t("wifi", "v"))}${band ? " " + esc(band) : ""}</span>`;
+        conn = `<span class="tag">${esc(t("wifi", "v"))}${c.band ? " " + esc(c.band) : ""}`
+          + (c.channel ? " ch" + esc(c.channel) : "") + (c.width ? " " + esc(c.width) : "") + "</span>";
       } else {
-        conn = `<span class="tag">${esc(t("wired", "v"))}</span>`;
+        conn = `<span class="tag">${esc(t("wired", "v"))}`
+          + (c.port ? " " + esc(c.port) : "")
+          + (c.speed ? " " + esc(c.speed) + "M " + esc(c.duplex || "") : "") + "</span>";
       }
       const rate = (c.tx != null || c.rx != null)
         ? `${c.tx != null ? c.tx : "-"} / ${c.rx != null ? c.rx : "-"} Mbit/s` : "-";
@@ -451,15 +461,23 @@
         <td>${esc(c.ip || "-")}</td>
         <td class="small">${esc(c.mac || "")}</td>
         <td>${conn}</td>
-        <td>${c.method === "wifi" ? sigTag(c.signal) : "-"}</td>
+        <td>${c.method === "wifi" ? sigTag(c.signal) + (c.quality ? ` <span class="tag ${esc(c.quality)}">${esc(t(c.quality, "v"))}</span>` : "") : "-"}</td>
         <td class="small">${esc(rate)}</td>
-        <td>${c.online ? `<span class="tag on">${esc(t("online", "v"))}</span>` : `<span class="tag off">${esc(t("offline", "v"))}</span>`}</td>
+        <td class="small">${c.traffic ? `${fmtB(c.traffic.up)} ↑ ${fmtB(c.traffic.down)} ↓` : "-"}</td>
+        <td>${c.online ? `<span class="tag on">${esc(t("online", "v"))}</span>` : `<span class="tag off">${esc(t("offline", "v"))}</span>`}${c.state ? ` <span class="small muted">${esc(c.state)}</span>` : ""}</td>
       </tr>`;
     }).join("");
     return wrap(`<div class="card"><h2>${esc(t("clients", "nav"))}</h2>
+      <div class="grid">
+        ${stat(t("total", "v"), d.total || 0)}
+        ${stat(t("wifi", "v"), d.wifi || 0)}
+        ${stat(t("wired", "v"), d.wired || 0)}
+      </div>
       <table><thead><tr><th>${esc(t("name"))}</th><th>IP</th><th>${esc(t("mac", "v"))}</th>
-      <th>${esc(t("method", "v"))}</th><th>${esc(t("signal", "v"))}</th><th>${esc(t("rate", "v"))}</th><th>${esc(t("status"))}</th></tr></thead><tbody>
-      ${rows || `<tr><td colspan="7" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <th>${esc(t("method", "v"))}</th><th>${esc(t("signal", "v"))}</th><th>${esc(t("rate", "v"))}</th>
+      <th>${esc(t("traffic", "v"))}</th><th>${esc(t("status"))}</th></tr></thead><tbody>
+      ${rows || `<tr><td colspan="8" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("clients_note", "v"))}</p>
       <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div></div>`);
   };
 
@@ -914,7 +932,7 @@
   VIEWS.zerotier = async function () {
     const d = await apiGet("zerotier");
     return wrap(`<div class="card"><h2>${esc(t("zerotier", "nav"))}</h2>
-      <div class="grid">${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}</div>
+      <div class="grid">${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}${stat(t("running"), d.running ? t("running") : t("stopped"))}</div>
       <pre class="log">${esc((d.info || "") + "\n" + (d.networks || "")) || esc(t("none"))}</pre>
       <div class="row"><div><label>Network ID</label><input id="zt-nwid" placeholder="8056c2e21c000001"></div></div>
       <div class="btn-row"><button id="zt-join">${esc(t("connect"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
@@ -944,12 +962,14 @@
   };
 
   VIEWS.ipv6 = async function () {
-    const d = await apiGet("network");
-    const rows = arr(d.interfaces).map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.ip || "-")}</td><td>${i.up ? t("on") : t("off")}</td></tr>`).join("");
+    const d = await apiGet("ipv6");
+    const rows = arr(d.interfaces).map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.proto || "-")}</td><td class="small">${esc(i.addr || "-")}</td><td>${i.up ? t("on") : t("off")}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("ipv6", "nav"))}</h2>
-      <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="small muted">IPv6 (wan6/odhcp6c) is configured in /etc/config/network; use LuCI for advanced IPv6.</p>
-      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
+      <div class="grid">${stat(t("ula", "v"), d.ula || t("none"))}${stat(t("filter_aaaa", "v"), d.filter_aaaa === "1" ? t("on") : t("off"))}</div>
+      <table><thead><tr><th>${esc(t("interface", "v"))}</th><th>${esc(t("proto", "v"))}</th><th>IPv6</th><th>${esc(t("status"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <pre class="log">${esc(d.nameservers || t("none"))}</pre>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/dns">${esc(t("dns", "nav"))} ›</a>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
 
@@ -957,12 +977,23 @@
     const d = await apiGet("firewall");
     const zones = arr(d.zones).map(z => `<tr><td>${esc(z.name)}</td><td>${esc(z.network || "-")}</td><td>${esc(z.input)}</td><td>${esc(z.output)}</td><td>${esc(z.forward)}</td></tr>`).join("");
     const rules = arr(d.rules).map(r => `<tr><td>${esc(r.name || r.idx)}</td><td>${esc(r.src || "-")}</td><td>${esc(r.dest || "-")}</td><td>${esc(r.dest_port || "-")}</td><td>${esc(r.target)}</td></tr>`).join("");
+    const fwd = arr(d.forwarding).map(f => `<tr><td>${esc(f.src || "-")}</td><td>${esc(f.dest || "-")}</td></tr>`).join("");
+    const def = d.defaults || {};
     return wrap(`<div class="card"><h2>${esc(t("firewall", "nav"))}</h2>
+      <div class="grid">
+        ${stat(t("rule_count", "v"), d.rule_count || 0)}
+        ${stat(t("input", "v"), def.input || "-")}
+        ${stat(t("output", "v"), def.output || "-")}
+        ${stat(t("forward", "v"), def.forward || "-")}
+      </div>
       <table><thead><tr><th>${esc(t("zones", "v"))}</th><th>${esc(t("networks", "v"))}</th><th>${esc(t("input", "v"))}</th><th>${esc(t("output", "v"))}</th><th>${esc(t("forward", "v"))}</th></tr></thead>
       <tbody>${zones || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>${esc(t("src", "v"))}</th><th>${esc(t("dest", "v"))}</th></tr></thead>
+      <tbody>${fwd || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <table><thead><tr><th>${esc(t("name"))}</th><th>src</th><th>dest</th><th>${esc(t("port", "v"))}</th><th>${esc(t("rule_target", "v"))}</th></tr></thead>
       <tbody>${rules || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a>${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div>
+      <p class="small muted">${esc(t("firewall_note", "v"))}</p>
+      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/parental">${esc(t("parental", "nav"))} ›</a>${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div>
     </div>`);
   };
 
@@ -992,18 +1023,77 @@
       <table><thead><tr><th>${esc(t("package", "v"))}</th><th>${esc(t("new_version", "v"))}</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="2" class="muted">${esc(t("up_to_date", "v"))}</td></tr>`}</tbody></table>
       <p class="small muted">${esc(t("upgrade_note", "v"))}</p>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Flash</a></div>
+      ${u.stale ? `<p class="small muted">${esc(t("index_stale", "v"))}</p>` : ""}
+      <div class="btn-row">
+        <button id="up-refresh">${esc(t("refresh_index", "v"))}</button>
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Flash</a>
+      </div>
     </div>`);
+  };
+  VIEWS.upgrade.mount = function () {
+    const b = $("#up-refresh");
+    if (!b) return;
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = t("scanning", "v");
+      const r = await apiPost("upgrades_refresh", {});
+      b.disabled = false;
+      b.textContent = t("refresh_index", "v");
+      const last = ((r.output || "").split("\n").filter(Boolean).pop()) || "";
+      toast(r.ok ? (last || t("saved")) : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      render();
+    };
   };
 
   VIEWS.advanced = async function () {
+    const d = await apiGet("advanced");
+    const s = d.system || {}, dn = d.dns || {}, sy = d.sysctl || {}, g = d.globals || {};
+    const kv = (k, v) => `<tr><td>${esc(k)}</td><td class="small">${esc(v || "-")}</td></tr>`;
     return wrap(`<div class="card"><h2>${esc(t("advanced", "nav"))}</h2>
-      <p class="small muted">Full LuCI, package manager and diagnostics.</p>
+      <div class="grid">
+        ${stat(t("hostname"), s.hostname || "-")}
+        ${stat(t("timezone", "nav"), s.zonename || s.timezone || "-")}
+        ${stat(t("load"), d.load || "-")}
+        ${stat(t("swap", "v"), d.swap ? t("on") : t("off"))}
+      </div>
+      <table><tbody>
+        ${kv(t("ntp", "v"), d.ntp)}
+        ${kv(t("dns_domain", "v"), dn.domain)}
+        ${kv(t("cache_size", "v"), dn.cachesize)}
+        ${kv(t("filter_aaaa", "v"), dn.filter_aaaa === "1" ? t("on") : t("off"))}
+        ${kv(t("ula", "v"), g.ula_prefix)}
+        ${kv(t("swappiness", "v"), sy.swappiness)}
+        ${kv(t("netdev_budget", "v"), sy.netdev_budget)}
+        ${kv(t("backlog", "v"), sy.backlog)}
+        ${kv(t("irqbalance", "v"), d.irqbalance ? t("on") : t("off"))}
+        ${kv(t("log_size", "v"), ((s.log_size || "-") + " " + (s.log_proto || "")).trim())}
+        ${kv(t("conloglevel", "v"), s.conloglevel)}
+        ${kv(t("cronloglevel", "v"), s.cronloglevel)}
+        ${kv(t("ttylogin", "v"), s.ttylogin === "1" ? t("on") : t("off"))}
+      </tbody></table>
+      <div class="row"><div><label>${esc(t("diagnostics", "v"))}</label>
+        <input id="diag-host" placeholder="${esc(t("gateway", "v"))}"></div></div>
+      <pre class="log" id="diag-out">${esc(t("none"))}</pre>
       <div class="btn-row">
-        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin" target="_blank">LuCI</a>
+        <button id="diag-run">${esc(t("run", "v"))}</button>
         <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/mirror">${esc(t("mirror", "nav"))} ›</a>
+        ${cfgBtn("/cgi-bin/luci/admin")}
       </div>
     </div>`);
+  };
+  VIEWS.advanced.mount = function () {
+    const b = $("#diag-run");
+    if (!b) return;
+    b.onclick = async () => {
+      const out = $("#diag-out");
+      b.disabled = true;
+      out.textContent = t("scanning", "v");
+      const r = await apiGet("diagnostics", { host: ($("#diag-host").value || "").trim() });
+      b.disabled = false;
+      out.textContent = r.ok
+        ? `${r.host}: ${r.received}/${r.transmitted} · ${r.loss}% ${t("loss", "v")} · min ${r.min} / avg ${r.avg} / max ${r.max} ms`
+        : (r.error || t("failed", "v"));
+    };
   };
 
   VIEWS.security = async function () {
