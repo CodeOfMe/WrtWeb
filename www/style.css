@@ -104,3 +104,19 @@ select.lang-select:focus{outline:none;border-color:var(--accent)}
 .stat-link:hover{border-color:var(--accent);transform:translateY(-1px)}
 .stat-link .go{position:absolute;top:10px;right:12px;color:var(--muted);font-size:16px}
 .stat-link:hover .go{color:var(--accent)}
+
+/* ---- theme: light ---- */
+html[data-theme="light"]{
+  --bg:#f2f5fa; --panel:#ffffff; --panel2:#eef2f8; --line:#d7deea;
+  --text:#18202c; --muted:#5a6a7d; --accent:#2563eb; --accent2:#16a34a;
+  --warn:#b45309; --danger:#dc2626;
+}
+html[data-theme="light"] #topbar{background:rgba(255,255,255,.86)}
+html[data-theme="light"] pre.log{background:#f5f7fb;color:#1f2937;border-color:var(--line)}
+html[data-theme="light"] .tag{background:#e8eef7}
+html[data-theme="light"] .stat-link:hover{border-color:var(--accent)}
+html[data-theme="light"] .brand .dot{box-shadow:0 0 10px rgba(37,99,235,.5)}
+/* theme toggle button */
+.theme-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+  border-radius:8px;padding:6px 10px;font-size:14px;cursor:pointer;line-height:1}
+.theme-btn:hover{border-color:var(--accent)}

@@ -1,8 +1,4 @@
-*.ipk
-*.apk
-*.deb
-*.rpm
-bin/
 *.o
 *.so
+bin/
 .DS_Store

@@ -74,7 +74,17 @@ make package/wrtweb/compile V=s
 # bin/packages/<arch>/wrtweb_*.{ipk,apk}
 ```
 
-Build locally in an OpenWrt SDK (no CI is used for this project).
+Build packages locally (no CI):
+
+```sh
+python3 scripts/build_pkg.py
+```
+
+Produces in `dist/`:
+- `wrtweb_<ver>_all.ipk` — for opkg-based OpenWrt (<= 23.05)
+- `wrtweb-<ver>-universal.tar.gz` — universal installer (`./install.sh`), works on opkg **and** apk (24.10/25.x) systems
+- `wrtweb_<ver>_all.apk` — Alpine v2 reference (OpenWrt 24.10+ needs APK v3 from the OpenWrt buildroot)
+
 
 ## Requirements on the router
 

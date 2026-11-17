@@ -29,6 +29,23 @@
     render();
   }
 
+  /* ---------------- theme ---------------- */
+  function applyTheme(mode) {
+    const m = mode || localStorage.getItem("wrtweb.theme") || "auto";
+    const sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = m === "dark" || (m === "auto" && sysDark);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = m === "auto" ? "🌓" : (m === "dark" ? "🌙" : "☀️");
+  }
+  function cycleTheme() {
+    const order = ["auto", "dark", "light"];
+    const cur = localStorage.getItem("wrtweb.theme") || "auto";
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    localStorage.setItem("wrtweb.theme", next);
+    applyTheme(next);
+  }
+
   /* ---------------- api ---------------- */
   async function apiGet(c, params) {
     const u = new URL(API_BASE);
@@ -927,6 +944,15 @@
     render();
     const mt = $("#menu-toggle");
     if (mt) mt.onclick = () => $("#sidebar").classList.toggle("open");
+    const tt = $("#theme-toggle");
+    if (tt) tt.onclick = cycleTheme;
+    const tqp = new URLSearchParams(location.search).get("theme");
+    if (tqp === "dark" || tqp === "light" || tqp === "auto") localStorage.setItem("wrtweb.theme", tqp);
+    applyTheme();
+    if (window.matchMedia) {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      if (mq.addEventListener) mq.addEventListener("change", () => applyTheme());
+    }
     const sw = $("#lang-switch");
     if (sw) sw.onchange = () => setLang(sw.value);
   }
