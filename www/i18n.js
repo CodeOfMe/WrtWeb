@@ -17,6 +17,7 @@ window.I18N = {
       ipv6:"IPv6", firewall:"Firewall", ports:"Port Forwarding", vlan:"VLAN",
       sysinfo:"System Status", timezone:"Timezone", logs:"Logs", upgrade:"Upgrade",
       mirror:"Software Source",
+      remote:"Remote Access",
       advanced:"Advanced", security:"Security", backup:"Backup / Restore", reboot:"Reboot",
       sms:"SMS"
     },
@@ -64,6 +65,11 @@ window.I18N = {
       mirror_note:"Choose a package mirror. Auto picks the fastest of TUNA / USTC / official.",
       current_source:"Current source", select_source:"Select source",
       auto:"Auto (fastest)", official:"Official",
+      samba_users:"Samba Users", username:"Username", add_user:"Add user",
+      samba_users_note:"Create a username and password, then access the share at \\\\<router>\\share.",
+      pw_min:"Password must be at least 5 characters.",
+      remote_note:"Allow hosts on the WAN side (e.g. 192.168.100.x) to open WrtWeb using the router's WAN IP.",
+      remote_url:"Access URL",
       modem_title:"USB Modem / Cellular Share", detected:"Detected device",
       enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
       wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
@@ -86,6 +92,7 @@ window.I18N = {
       ipv6:"IPv6", firewall:"防火墙", ports:"端口转发", vlan:"VLAN",
       sysinfo:"系统状态", timezone:"时区", logs:"日志", upgrade:"升级",
       mirror:"软件源",
+      remote:"远程访问",
       advanced:"高级", security:"安全", backup:"备份/恢复", reboot:"重启",
       sms:"短信"
     },
@@ -133,6 +140,11 @@ window.I18N = {
       mirror_note:"选择软件源。自动模式会在 TUNA / USTC / 官方中选择最快的一个。",
       current_source:"当前软件源", select_source:"选择软件源",
       auto:"自动（最快）", official:"官方",
+      samba_users:"Samba 用户", username:"用户名", add_user:"添加用户",
+      samba_users_note:"创建用户名和密码后，通过 \\\\<路由器>\\share 访问共享。",
+      pw_min:"密码至少 5 个字符。",
+      remote_note:"允许 WAN 侧主机（如 192.168.100.x）通过路由器 WAN 地址打开 WrtWeb。",
+      remote_url:"访问地址",
       modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
       enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
       wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"

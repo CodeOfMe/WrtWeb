@@ -110,6 +110,7 @@
       { key: "timezone", ic: "🕒" },
       { key: "logs", ic: "📜" },
       { key: "mirror", ic: "⇅" },
+      { key: "remote", ic: "🛰" },
       { key: "upgrade", ic: "⤒" },
       { key: "advanced", ic: "⚙" },
       { key: "security", ic: "🔑" },
@@ -472,21 +473,51 @@
   };
 
   VIEWS.nas = async function () {
-    const d = await apiGet("nas");
-    return wrap(`<div class="card"><h2>${esc(t("nas", "nav"))}</h2>
-      <div class="grid">${stat(t("samba", "v"), d.samba_enabled==="1" ? t("enabled") : t("disabled"))}</div>
-      <p class="small muted">${esc(t("mounts", "v"))}: ${esc(d.mounts || "-")}</p>
-      <div class="btn-row">
-        <button id="nas-on">${esc(t("enabled"))}</button>
-        <button class="ghost" id="nas-off">${esc(t("disabled"))}</button>
-        ${cfgBtn("/cgi-bin/luci/admin/services/samba4")}
+    const [d, su] = await Promise.all([apiGet("nas"), apiGet("samba_users")]);
+    const users = arr(su.users);
+    const userRows = users.map(u => `<div class="list-item"><div class="grow"><strong>${esc(u)}</strong></div>
+      <button class="ghost" data-su-del="${esc(u)}">${esc(t("remove"))}</button></div>`).join("");
+    return wrap(`
+      <div class="card"><h2>${esc(t("nas", "nav"))}</h2>
+        <div class="grid">${stat(t("samba", "v"), d.samba_enabled === "1" ? t("enabled") : t("disabled"))}</div>
+        <p class="small muted">${esc(t("mounts", "v"))}: ${esc(d.mounts || "-")}</p>
+        <div class="btn-row">
+          <button id="nas-on">${esc(t("enabled"))}</button>
+          <button class="ghost" id="nas-off">${esc(t("disabled"))}</button>
+          ${cfgBtn("/cgi-bin/luci/admin/services/samba4")}
+        </div>
+        <p class="muted small">${esc(t("nas_note", "v"))}</p>
       </div>
-      <p class="muted small">${esc(t("nas_note", "v"))}</p>
-    </div>`);
+      <div class="card"><h2>${esc(t("samba_users", "v"))}</h2>
+        <div>${userRows || `<div class="muted">${esc(t("none"))}</div>`}</div>
+        <div class="row">
+          <div><label>${esc(t("username", "v"))}</label><input id="su-user" autocomplete="off"></div>
+          <div><label>${esc(t("password"))}</label><input id="su-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="btn-row"><button id="su-add">${esc(t("add_user", "v"))}</button></div>
+        <p class="muted small">${esc(t("samba_users_note", "v"))}</p>
+      </div>`);
   };
   VIEWS.nas.mount = function () {
-    $("#nas-on").onclick = async () => { const r=await apiPost("nas_set",{enabled:"1"}); toast(r.ok?t("saved"):t("failed", "v"),r.ok?"ok":"err"); };
-    $("#nas-off").onclick = async () => { const r=await apiPost("nas_set",{enabled:"0"}); toast(r.ok?t("saved"):t("failed", "v"),r.ok?"ok":"err"); };
+    const on = $("#nas-on"), off = $("#nas-off");
+    if (on) on.onclick = async () => { const r = await apiPost("nas_set", { enabled: "1" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+    if (off) off.onclick = async () => { const r = await apiPost("nas_set", { enabled: "0" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+    const add = $("#su-add");
+    if (add) add.onclick = async () => {
+      const user = $("#su-user").value.trim(), pass = $("#su-pass").value;
+      if (!user) return toast(t("username", "v"), "err");
+      if (pass.length < 5) return toast(t("pw_min", "v"), "err");
+      const r = await apiPost("samba_user_add", { user, pass });
+      toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      if (r.ok) render();
+    };
+    document.querySelectorAll("[data-su-del]").forEach(b => {
+      b.onclick = async () => {
+        const r = await apiPost("samba_user_del", { user: b.getAttribute("data-su-del") });
+        toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err");
+        if (r.ok) render();
+      };
+    });
   };
 
   VIEWS.ddns = async function () {
@@ -525,6 +556,28 @@
     </div>`);
   };
   VIEWS.clash.mount = bindSvc;
+
+  VIEWS.remote = async function () {
+    const d = await apiGet("remote_access");
+    const url = "https://" + (d.wan_ip || location.hostname) + "/wrtweb/";
+    return wrap(`<div class="card"><h2>${esc(t("remote", "nav"))}</h2>
+      <p class="muted small">${esc(t("remote_note", "v"))}</p>
+      <div class="grid">
+        ${stat(t("status"), d.enabled ? t("enabled") : t("disabled"))}
+        ${stat("WAN", d.wan_ip || "-")}
+      </div>
+      <div class="row"><div><label>${esc(t("remote_url", "v"))}</label><input readonly value="${esc(url)}"></div></div>
+      <div class="btn-row">
+        <button id="ra-on">${esc(t("enabled"))}</button>
+        <button class="ghost" id="ra-off">${esc(t("disabled"))}</button>
+        ${cfgBtn("/cgi-bin/luci/admin/network/firewall")}
+      </div>
+    </div>`);
+  };
+  VIEWS.remote.mount = function () {
+    $("#ra-on").onclick = async () => { const r = await apiPost("remote_access_set", { enabled: "1" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+    $("#ra-off").onclick = async () => { const r = await apiPost("remote_access_set", { enabled: "0" }); toast(r.ok ? t("saved") : t("failed", "v"), r.ok ? "ok" : "err"); render(); };
+  };
 
   VIEWS.mirror = async function () {
     const d = await apiGet("mirror");

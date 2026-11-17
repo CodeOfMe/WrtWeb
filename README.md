@@ -74,8 +74,7 @@ make package/wrtweb/compile V=s
 # bin/packages/<arch>/wrtweb_*.{ipk,apk}
 ```
 
-GitHub Actions (`.github/workflows/build.yml`) builds ipk + apk for several
-targets.
+Build locally in an OpenWrt SDK (no CI is used for this project).
 
 ## Requirements on the router
 

@@ -391,8 +391,56 @@ function R.nas()
 end
 
 function R.nas_set()
-  if qs.enabled == "1" then sh("/etc/init.d/samba4 enable 2>/dev/null; /etc/init.d/samba4 restart 2>/dev/null"); sh("/etc/init.d/samba enable 2>/dev/null; /etc/init.d/samba restart 2>/dev/null")
-  elseif qs.enabled == "0" then sh("/etc/init.d/samba4 stop 2>/dev/null; /etc/init.d/samba4 disable 2>/dev/null") end
+  if qs.enabled == "1" then
+    -- ensure an authenticated share over /mnt exists
+    if trim(sh("uci -q get samba4.@sambashare[0].path")) == "" then
+      sh("uci add samba4 sambashare")
+      uci_set("samba4.@sambashare[-1].name", "share")
+      uci_set("samba4.@sambashare[-1].path", "/mnt")
+      uci_set("samba4.@sambashare[-1].read_only", "no")
+      uci_set("samba4.@sambashare[-1].guest_ok", "no")
+      uci_set("samba4.@sambashare[-1].create_mask", "0666")
+      uci_set("samba4.@sambashare[-1].dir_mask", "0777")
+      uci_commit("samba4")
+    end
+    sh("/etc/init.d/samba4 enable 2>/dev/null; /etc/init.d/samba4 restart 2>/dev/null")
+    sh("/etc/init.d/samba enable 2>/dev/null; /etc/init.d/samba restart 2>/dev/null")
+  elseif qs.enabled == "0" then
+    sh("/etc/init.d/samba4 stop 2>/dev/null; /etc/init.d/samba4 disable 2>/dev/null")
+  end
+  return { ok=true }
+end
+
+-- Samba user management
+function R.samba_users()
+  local users = {}
+  for line in sh("pdbedit -L 2>/dev/null"):gmatch("[^\n]+") do
+    local u = line:match("^([^:]+):")
+    if u and u ~= "" then users[#users+1] = u end
+  end
+  return { users = users }
+end
+
+function R.samba_user_add()
+  local u = qs.user or ""
+  local p = qs.pass or ""
+  if not u:match("^[%w_%-]+$") or #u > 32 then return { ok=false, error="bad username" } end
+  if #p < 5 then return { ok=false, error="password too short (min 5)" } end
+  if trim(sh("id -u "..shq(u).." 2>/dev/null")) == "" then
+    sh("useradd -M -s /bin/false -U "..shq(u).." >/dev/null 2>&1")
+  end
+  local out = sh("printf '%s\\n%s\\n' "..shq(p).." "..shq(p).." | smbpasswd -a -s "..shq(u).." 2>&1")
+  local cnt = trim(sh("pdbedit -L 2>/dev/null | grep -c '^"..u..":'"))
+  sh("/etc/init.d/samba4 restart >/dev/null 2>&1")
+  return { ok = (cnt ~= "" and cnt ~= "0"), output = out }
+end
+
+function R.samba_user_del()
+  local u = qs.user or ""
+  if not u:match("^[%w_%-]+$") then return { ok=false } end
+  sh("smbpasswd -x "..shq(u).." >/dev/null 2>&1")
+  sh("userdel "..shq(u).." >/dev/null 2>&1")
+  sh("/etc/init.d/samba4 restart >/dev/null 2>&1")
   return { ok=true }
 end
 
@@ -571,6 +619,44 @@ end
 -- OpenVPN profile listing
 function R.ovpn()
   return { files = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null")) }
+end
+
+-- Remote WrtWeb access from the WAN side (e.g. hosts on 192.168.100.0/24)
+local REMOTE_RULE = "Allow-WrtWeb-WAN"
+local function find_remote_rule()
+  for sec, name in sh("uci show firewall 2>/dev/null"):gmatch("firewall%.([^%.]+)%.name='([^']*)'") do
+    if name == REMOTE_RULE then return sec end
+  end
+  return nil
+end
+
+function R.remote_access()
+  local sec = find_remote_rule()
+  local wanip = trim(sh("ubus call network.interface.wan status | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+  return { enabled = (sec ~= nil), wan_ip = wanip }
+end
+
+function R.remote_access_set()
+  local sec = find_remote_rule()
+  if qs.enabled == "1" then
+    if not sec then
+      sh("uci add firewall rule")
+      uci_set("firewall.@rule[-1].name", REMOTE_RULE)
+      uci_set("firewall.@rule[-1].src", "wan")
+      uci_set("firewall.@rule[-1].src_ip", "192.168.100.0/24")
+      uci_set("firewall.@rule[-1].proto", "tcp")
+      uci_set("firewall.@rule[-1].dest_port", "80 443")
+      uci_set("firewall.@rule[-1].target", "ACCEPT")
+      uci_commit("firewall")
+    end
+    uci_set("uhttpd.main.rfc1918_filter", "0"); uci_commit("uhttpd")
+  else
+    if sec then sh("uci delete firewall."..sec); uci_commit("firewall") end
+    uci_set("uhttpd.main.rfc1918_filter", "1"); uci_commit("uhttpd")
+  end
+  sh("/etc/init.d/firewall reload >/dev/null 2>&1")
+  sh("(sleep 2; /etc/init.d/uhttpd restart) >/dev/null 2>&1 &")
+  return { ok=true }
 end
 
 -- System: language / timezone / upgrade / backup / reboot / logs
