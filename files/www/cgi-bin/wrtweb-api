@@ -229,7 +229,7 @@ function R.clients()
     if mac then add(mac, ip, (host == "*" and "" or host), true) end
   end
   for ip, dev, mac in sh("ip neigh 2>/dev/null"):gmatch("(%d+%.%d+%.%d+%.%d+)%s+dev%s+(%S+)%s+lladdr%s+(%x%x:[%x:]+)") do
-    if dev:match("^br%-") or dev:match("^phy") or dev:match("^wlan") or dev:match("^eth%d") == nil then
+    if dev:match("^br%-") or dev:match("^phy") or dev:match("^wlan") then
       add(mac, ip, "", true)
     end
   end
