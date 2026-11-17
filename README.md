@@ -34,10 +34,16 @@ Open it at `https://<router>/wrtweb/` or from LuCI → **WrtWeb**.
 - **AdGuard Home** status + start/stop, **NAS/Samba** toggle
 - **Dynamic DNS** listing, **VPN** status (WireGuard/OpenVPN detection)
 - **Plugins** (installed package list), **Logs**, **Timezone/hostname**, **Reboot**
+- **Firewall** zones + rules read live from UCI (fw4), **VLAN** devices / 802.1Q IDs
+- **Parental Control**: one firewall rule per device MAC — block / unblock from the UI
+- **Security**: root password state, dropbear interfaces, listening TCP ports,
+  SSH/Web-from-WAN flags
+- **Backup / Restore**: builds the sysupgrade archive (`sysupgrade -b`) and serves it
+  as a download; **Upgrade** lists what the package manager says is upgradable
 - English + 简体中文 UI switch
 
-Screens whose daemons may be absent (Tor, Tailscale, ZeroTier, parental control,
-multi-WAN, VLAN, IPv6, firmware upgrade, backup) are present and wired to the
+Screens whose daemons may be absent (Tor, Tailscale, ZeroTier, multi-WAN, IPv6)
+are present and wired to the
 standard OpenWrt package for that feature; install the package to enable control.
 
 ## Architecture

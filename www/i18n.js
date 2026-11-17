@@ -84,7 +84,20 @@ window.I18N = {
       wireless_aps:"Wireless", stations:"Stations", system_log:"System Log",
       modem_title:"USB Modem / Cellular Share", detected:"Detected device",
       enable_share:"Enable share", modem_note:"Share a USB 4G/5G modem as the router uplink.",
-      wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering"
+      wifi_hotspot:"Wi-Fi Hotspot", apn:"APN", tethering:"Tethering",
+      zones:"Zones", networks:"Networks", input:"Input", output:"Output", forward:"Forward",
+      rule_target:"Target", port:"Port", devices:"Devices",
+      vlan_note:"802.1Q VLANs are created on the switch device in LuCI (Network → Interfaces → Devices).",
+      root_password:"Root password", pw_locked:"Locked", pw_set:"Set",
+      web_wan:"Web from WAN", shell_access:"Shell access", listening_ports:"Listening ports",
+      pw_note:"The root password itself is changed in LuCI → System → Administration.",
+      config_files:"Config files", keepfiles:"Preserved files", pkgtool:"Package tool",
+      download_backup:"Download backup", restore_note:"Restore is done in LuCI (System → Backup / Flash Firmware); a restore reboots the device.",
+      upgradable:"Upgradable", package:"Package", new_version:"New version",
+      up_to_date:"Everything is up to date",
+      upgrade_note:"Flash a sysupgrade image in LuCI (System → Backup / Flash Firmware); the package list here is read live from the router.",
+      blocked:"Blocked", allowed:"Allowed", block:"Block", unblock:"Unblock",
+      parental_note:"One firewall rule per device MAC; Block drops that device in the LAN zone."
     }
   },
   zh: {
@@ -171,7 +184,20 @@ window.I18N = {
       wireless_aps:"无线", stations:"接入终端", system_log:"系统日志",
       modem_title:"USB 上网卡 / 蜂窝共享", detected:"检测到的设备",
       enable_share:"启用共享", modem_note:"将 USB 4G/5G 上网卡作为路由器上行共享。",
-      wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享"
+      wifi_hotspot:"无线热点", apn:"APN", tethering:"网络共享",
+      zones:"区域", networks:"网络", input:"入站", output:"出站", forward:"转发",
+      rule_target:"目标", port:"端口", devices:"设备",
+      vlan_note:"802.1Q VLAN 在 LuCI 的交换机设备里定义（网络 → 接口 → 设备）。",
+      root_password:"root 密码", pw_locked:"已锁定", pw_set:"已设置",
+      web_wan:"WAN 侧 Web", shell_access:"Shell 访问", listening_ports:"监听端口",
+      pw_note:"root 密码本身在 LuCI → 系统 → 管理 中修改。",
+      config_files:"配置文件数", keepfiles:"保留文件数", pkgtool:"包管理器",
+      download_backup:"下载备份", restore_note:"恢复在 LuCI（系统 → 备份/闪存）进行；恢复会重启设备。",
+      upgradable:"可升级", package:"软件包", new_version:"新版本",
+      up_to_date:"全部已是最新",
+      upgrade_note:"在 LuCI（系统 → 备份/闪存）刷写 sysupgrade 镜像；这里的软件包列表是从路由器实时读取的。",
+      blocked:"已拦截", allowed:"允许", block:"拦截", unblock:"放行",
+      parental_note:"每个设备 MAC 对应一条防火墙规则；拦截即在 lan 区域丢弃该设备流量。"
     }
   }
 };

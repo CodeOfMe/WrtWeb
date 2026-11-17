@@ -921,31 +921,44 @@
   };
 
   VIEWS.firewall = async function () {
-    const d = await apiGet("portforward");
-    const rows = arr(d.rules).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.proto)}</td><td>${esc(r.src_dport)}</td><td>${esc(r.dest_ip)}</td></tr>`).join("");
+    const d = await apiGet("firewall");
+    const zones = arr(d.zones).map(z => `<tr><td>${esc(z.name)}</td><td>${esc(z.network || "-")}</td><td>${esc(z.input)}</td><td>${esc(z.output)}</td><td>${esc(z.forward)}</td></tr>`).join("");
+    const rules = arr(d.rules).map(r => `<tr><td>${esc(r.name || r.idx)}</td><td>${esc(r.src || "-")}</td><td>${esc(r.dest || "-")}</td><td>${esc(r.dest_port || "-")}</td><td>${esc(r.target)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("firewall", "nav"))}</h2>
-      <p class="small muted">Zones/rules via fw4. Forwarded ports:</p>
-      <table><thead><tr><th>${esc(t("name"))}</th><th>${esc(t("proto", "v"))}</th><th>${esc(t("ext_port", "v"))}</th><th>${esc(t("internal_ip", "v"))}</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>${esc(t("zones", "v"))}</th><th>${esc(t("networks", "v"))}</th><th>${esc(t("input", "v"))}</th><th>${esc(t("output", "v"))}</th><th>${esc(t("forward", "v"))}</th></tr></thead>
+      <tbody>${zones || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>${esc(t("name"))}</th><th>src</th><th>dest</th><th>${esc(t("port", "v"))}</th><th>${esc(t("rule_target", "v"))}</th></tr></thead>
+      <tbody>${rules || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/ports">${esc(t("ports", "nav"))} ›</a>${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div>
     </div>`);
   };
 
   VIEWS.vlan = async function () {
-    const d = await apiGet("network");
-    const rows = arr(d.interfaces).map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.ip || "-")}</td><td>${i.up ? t("on") : t("off")}</td></tr>`).join("");
+    const d = await apiGet("vlan");
+    const devs = arr(d.devices).map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.ports || "-")}</td></tr>`).join("");
+    const vlans = arr(d.vlans).map(v => `<tr><td>${esc(v.name)}</td><td>${esc(v.vid)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("vlan", "nav"))}</h2>
-      <table><thead><tr><th>Interface</th><th>IP</th><th>${esc(t("status"))}</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="small muted">Create 802.1Q VLAN interfaces in LuCI (Network → Interfaces → Devices).</p>
+      <table><thead><tr><th>${esc(t("devices", "v"))}</th><th>type</th><th>${esc(t("ports", "v"))}</th></tr></thead>
+      <tbody>${devs || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>802.1Q</th><th>VLAN ID</th></tr></thead>
+      <tbody>${vlans || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("vlan_note", "v"))}</p>
       <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
 
   VIEWS.upgrade = async function () {
-    const d = await apiGet("overview");
+    const [d, u] = await Promise.all([apiGet("overview"), apiGet("upgrades")]);
+    const rows = arr(u.upgradable).map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.to || "-")}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("upgrade", "nav"))}</h2>
-      <div class="grid">${stat(t("firmware"), d.firmware, true)}</div>
-      <p class="small muted">Upload a sysupgrade image in LuCI (System → Backup / Flash Firmware).</p>
+      <div class="grid">
+        ${stat(t("firmware"), d.firmware, true)}
+        ${stat(t("pkgtool", "v"), u.pkgtool || t("none"))}
+        ${stat(t("upgradable", "v"), u.count)}
+      </div>
+      <table><thead><tr><th>${esc(t("package", "v"))}</th><th>${esc(t("new_version", "v"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="2" class="muted">${esc(t("up_to_date", "v"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("upgrade_note", "v"))}</p>
       <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Flash</a></div>
     </div>`);
   };
@@ -961,27 +974,72 @@
   };
 
   VIEWS.security = async function () {
+    const d = await apiGet("security");
+    const ports = arr(d.listening).map(p => `<tr><td>${esc(p.addr)}</td><td>${esc(p.port)}</td></tr>`).join("");
+    const shell = arr(d.shell_access).map(s => `<tr><td>${esc(s.interface)}</td><td>${esc(s.port)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("security", "nav"))}</h2>
-      <p class="small muted">Change the admin (root) password in LuCI → System → Administration.</p>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/admin" target="_blank">LuCI Admin</a></div>
+      <div class="grid">
+        ${stat(t("root_password", "v"), d.root_password_locked ? t("pw_locked", "v") : t("pw_set", "v"))}
+        ${stat(t("ssh_wan", "v"), d.ssh_wan ? t("on") : t("off"))}
+        ${stat(t("web_wan", "v"), d.web_wan ? t("on") : t("off"))}
+        ${stat("HTTPS", d.https ? t("on") : t("off"))}
+      </div>
+      <table><thead><tr><th>${esc(t("shell_access", "v"))}</th><th>${esc(t("port", "v"))}</th></tr></thead>
+      <tbody>${shell || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>${esc(t("listening_ports", "v"))}</th><th></th></tr></thead>
+      <tbody>${ports || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("pw_note", "v"))}</p>
+      <div class="btn-row">
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/remote">${esc(t("remote", "nav"))} ›</a>
+        ${cfgBtn("/cgi-bin/luci/admin/system/admin")}
+      </div>
     </div>`);
   };
 
   VIEWS.backup = async function () {
+    const d = await apiGet("backup");
+    const files = arr(d.files).map(f => `<tr><td>${esc(f)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("backup", "nav"))}</h2>
-      <p class="small muted">Download / restore the configuration archive.</p>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/system/flash" target="_blank">LuCI Backup</a></div>
+      <div class="grid">
+        ${stat(t("config_files", "v"), d.count)}
+        ${stat(t("keepfiles", "v"), d.keepfiles)}
+        ${stat(t("pkgtool", "v"), d.tool ? "sysupgrade" : t("none"))}
+      </div>
+      <table><tbody>${files || `<tr><td class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <div class="btn-row">
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="${esc(d.download || "#")}">${esc(t("download_backup", "v"))}</a>
+        ${cfgBtn("/cgi-bin/luci/admin/system/flash")}
+      </div>
+      <p class="small muted">${esc(t("restore_note", "v"))}</p>
     </div>`);
   };
 
   VIEWS.parental = async function () {
+    const d = await apiGet("parental");
+    const rows = arr(d.clients).map(c => `<tr>
+      <td>${esc(c.name || "-")}</td><td>${esc(c.mac)}</td><td>${esc(c.ip || "-")}</td>
+      <td>${c.blocked ? esc(t("blocked", "v")) : esc(t("allowed", "v"))}</td>
+      <td>${c.blocked
+        ? `<button class="ghost" data-unblock="${esc(c.mac)}">${esc(t("unblock", "v"))}</button>`
+        : `<button data-block="${esc(c.mac)}">${esc(t("block", "v"))}</button>`}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("parental", "nav"))}</h2>
-      <p class="small muted">Restrict device access via firewall rules. See connected devices and manage rules.</p>
-      <div class="btn-row">
-        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/clients">${esc(t("clients", "nav"))} ›</a>
-        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/network/firewall" target="_blank">LuCI Firewall</a>
-      </div>
+      <table><thead><tr><th>${esc(t("name"))}</th><th>${esc(t("mac", "v"))}</th><th>IP</th>
+      <th>${esc(t("status"))}</th><th>${esc(t("action"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("parental_note", "v"))}</p>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/firewall")}</div>
     </div>`);
+  };
+  VIEWS.parental.mount = function () {
+    const run = async (c, mac) => {
+      const r = await apiPost(c, { mac });
+      toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+      if (r.ok) render();
+    };
+    document.querySelectorAll("[data-block]").forEach(b =>
+      b.onclick = () => run("parental_block", b.getAttribute("data-block")));
+    document.querySelectorAll("[data-unblock]").forEach(b =>
+      b.onclick = () => run("parental_unblock", b.getAttribute("data-unblock")));
   };
 
   VIEWS.astrowarp = async function () {

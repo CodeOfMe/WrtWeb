@@ -937,6 +937,221 @@ function R.network()
 end
 
 ------------------------------------------------------------------
+-- firewall zones / rules, VLANs, security, upgrades, backup, parental control
+------------------------------------------------------------------
+
+-- Parse `uci -q show <cfg>` into { section = { key = value } }.
+-- Repeated list options are joined with a space.
+local function uci_sections(cfg)
+  local secs = {}
+  for line in sh("uci -q show " .. cfg):gmatch("[^\n]+") do
+    local sec, key, val = line:match("^" .. cfg .. "%.([^%.]+)%.(%w+)='?([^']*)'?$")
+    if sec then
+      if not secs[sec] then secs[sec] = {} end
+      if secs[sec][key] then secs[sec][key] = secs[sec][key] .. " " .. val
+      else secs[sec][key] = val end
+    end
+  end
+  return secs
+end
+
+local function section_kind(name, s)
+  local base = (name:gsub("@", ""):gsub("%[", ""):gsub("%]", ""):lower():match("^(%a+)")) or ""
+  if base == "rule" or base == "redirect" or base == "zone" then return base end
+  -- named sections do not carry their type in `uci show`, so infer from the keys
+  if s.input or s.output or s.forward then return "zone" end
+  if s.dest_ip or s.src_dport then return "redirect" end
+  if s.src and s.target then return "rule" end
+  return base
+end
+
+-- pairs() is unordered, so walk UCI sections in index order for stable output
+local function sorted_names(secs)
+  local names = {}
+  for n in pairs(secs) do names[#names + 1] = n end
+  table.sort(names, function(a, b)
+    local ai = tonumber(a:match("%[(%d+)%]") or a:match("(%d+)") or 0)
+    local bi = tonumber(b:match("%[(%d+)%]") or b:match("(%d+)") or 0)
+    return ai < bi
+  end)
+  return names
+end
+
+function R.firewall()
+  local secs = uci_sections("firewall")
+  local zones, rules = {}, {}
+  for _, name in ipairs(sorted_names(secs)) do
+    local s = secs[name]
+    local k = section_kind(name, s)
+    if k == "zone" then
+      zones[#zones + 1] = {
+        idx = name, name = s.name or name, network = s.network or "",
+        input = s.input or "", output = s.output or "", forward = s.forward or "",
+      }
+    elseif k == "rule" then
+      rules[#rules + 1] = {
+        idx = name, name = s.name or "", src = s.src or "", dest = s.dest or "",
+        dest_port = s.dest_port or "", src_mac = s.src_mac or "",
+        proto = s.proto or "", target = s.target or "ACCEPT",
+      }
+    end
+  end
+  return { zones = zones, rules = rules }
+end
+
+function R.vlan()
+  local secs = uci_sections("network")
+  local devs = {}
+  for _, name in ipairs(sorted_names(secs)) do
+    local s = secs[name]
+    if s.type == "bridge" or s.type == "dsa" then
+      devs[#devs + 1] = { name = s.name or name, type = s.type, ports = s.ports or "" }
+    end
+  end
+  local vlans = {}
+  for line in sh("ip -d link show 2>/dev/null"):gmatch("[^\n]+") do
+    local nm, vid = line:match("^(%S+):.*vlan.*vid (%d+)")
+    if nm then vlans[#vlans + 1] = { name = nm, vid = tonumber(vid) } end
+  end
+  return { devices = devs, vlans = vlans }
+end
+
+function R.security()
+  local hash = sh("grep '^root:' /etc/shadow 2>/dev/null"):match("^root:([^:]+)") or ""
+  local locked = (hash == "") or (hash:match("^[*!]") ~= nil)
+  local ports = {}
+  for line in sh("netstat -tln 2>/dev/null"):gmatch("[^\n]+") do
+    local addr, port = line:match("^(%S+):(%d+)")
+    if port then ports[#ports + 1] = { addr = addr, port = tonumber(port) } end
+  end
+  local db = uci_sections("dropbear")
+  local inst = {}
+  for _, name in ipairs(sorted_names(db)) do
+    inst[#inst + 1] = {
+      interface = db[name].Interface or db[name].interface or "all",
+      port = db[name].Port or db[name].port or "22",
+    }
+  end
+  return {
+    root_password_locked = locked,
+    shell_access = inst,
+    listening = ports,
+    ssh_wan = R.remote_ssh().enabled,
+    web_wan = R.remote_access().enabled,
+    https = trim(sh("uci -q get uhttpd.main.https")) == "1",
+  }
+end
+
+function R.upgrades()
+  local raw = sh("apk list --upgradeable 2>/dev/null || opkg list-upgradable 2>/dev/null")
+  local up = {}
+  for line in raw:gmatch("[^\n]+") do
+    local name = line:match("^(%S+) %S+") or line:match("^(%S+)")
+    if name then
+      up[#up + 1] = { name = name, to = line:match("%->%s*(%S+)") or "" }
+    end
+  end
+  return {
+    upgradable = up, count = #up,
+    pkgtool = (trim(sh("command -v apk")) ~= "" and "apk") or (trim(sh("command -v opkg")) ~= "" and "opkg") or "",
+    attended = trim(sh("command -v attendedsysupgrade-cli")) ~= "",
+    verify = trim(sh("uci -q get attendedsysupgrade.common.verify")) == "1",
+  }
+end
+
+function R.backup()
+  local files = {}
+  for line in sh("ls /etc/config 2>/dev/null"):gmatch("[^\n]+") do files[#files + 1] = line end
+  return {
+    files = files, count = #files,
+    keepfiles = tonumber(trim(sh("ls /lib/upgrade/keep.d 2>/dev/null | wc -l"))) or 0,
+    tool = trim(sh("command -v sysupgrade")) ~= "",
+    download = "/cgi-bin/wrtweb-api?c=backup_download",
+  }
+end
+
+-- Build the sysupgrade archive and stream it to the browser.
+function R.backup_download()
+  if trim(sh("command -v sysupgrade")) == "" then
+    out({ ok = false, error = "sysupgrade not available" }); return
+  end
+  local host = (trim(sh("cat /proc/sys/kernel/hostname")) or "openwrt"):gsub("[^%w%-_]", "")
+  local path = "/tmp/wrtweb-backup-" .. host .. ".tar.gz"
+  if trim(sh("sysupgrade -b " .. shq(path) .. " && echo ok")) ~= "ok" then
+    out({ ok = false, error = "backup failed" }); return
+  end
+  local f = io.open(path, "rb")
+  if not f then out({ ok = false, error = "archive not found" }); return end
+  local data = f:read("*a"); f:close()
+  io.write("Content-Type: application/x-gzip\r\n")
+  io.write("Content-Disposition: attachment; filename=\"" .. path:match("[^/]+$") .. "\"\r\n")
+  io.write("Content-Length: " .. #data .. "\r\n\r\n")
+  io.write(data)
+end
+
+-- Parental control: one firewall rule per device MAC.
+local PARENT_PREFIX = "Parental-"
+
+local function norm_mac(s)
+  s = tostring(s or ""):upper()
+  if #s == 17 and s:match("^[%x:]+$") then return s end
+  return nil
+end
+
+local function parental_rule(mac)
+  for name, s in pairs(uci_sections("firewall")) do
+    if section_kind(name, s) == "rule" and (s.src_mac or ""):upper() == mac then return name end
+  end
+  return nil
+end
+
+function R.parental()
+  local blocked = {}
+  for name, s in pairs(uci_sections("firewall")) do
+    if section_kind(name, s) == "rule" and (s.name or ""):match("^" .. PARENT_PREFIX) then
+      blocked[(s.src_mac or ""):upper()] = name
+    end
+  end
+  local rows = {}
+  for _, c in ipairs(R.clients().clients) do
+    rows[#rows + 1] = {
+      mac = c.mac, ip = c.ip, name = c.name, source = c.source,
+      blocked = blocked[(c.mac or ""):upper()] ~= nil,
+    }
+  end
+  return { clients = rows }
+end
+
+function R.parental_block()
+  local mac = norm_mac(qs.mac)
+  if not mac then return { ok = false, error = "bad mac" } end
+  if not parental_rule(mac) then
+    sh("uci add firewall rule")
+    uci_set("firewall.@rule[-1].name", PARENT_PREFIX .. mac)
+    uci_set("firewall.@rule[-1].src", qs.zone or "lan")
+    uci_set("firewall.@rule[-1].src_mac", mac)
+    uci_set("firewall.@rule[-1].dest", "*")
+    uci_set("firewall.@rule[-1].proto", "all")
+    uci_set("firewall.@rule[-1].target", "REJECT")
+    uci_commit("firewall")
+  end
+  sh("/etc/init.d/firewall reload >/dev/null 2>&1")
+  return { ok = true }
+end
+
+function R.parental_unblock()
+  local mac = norm_mac(qs.mac)
+  if not mac then return { ok = false, error = "bad mac" } end
+  local sec = parental_rule(mac)
+  if sec then
+    sh("uci delete " .. shq("firewall." .. sec))
+    uci_commit("firewall")
+    sh("/etc/init.d/firewall reload >/dev/null 2>&1")
+  end
+  return { ok = true }
+end
+
+------------------------------------------------------------------
 -- dispatch
 ------------------------------------------------------------------
 local c = qs.c or "overview"
