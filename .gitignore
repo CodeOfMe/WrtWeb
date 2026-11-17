@@ -2,3 +2,5 @@
 *.so
 bin/
 .DS_Store
+# browser_view.py dumps contain session ids, MACs and client names
+wrtview/
