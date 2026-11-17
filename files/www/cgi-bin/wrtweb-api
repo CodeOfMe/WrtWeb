@@ -411,12 +411,53 @@ function R.nas_set()
   return { ok=true }
 end
 
--- Samba user management
+-- Samba user management (+ per-user storage location)
+local function find_share(name)
+  local i = 0
+  while i <= 64 do
+    local nm = uci_get("samba4", "@sambashare["..i.."]", "name")
+    if nm == "" then return nil end
+    if nm == name then return i end
+    i = i + 1
+  end
+  return nil
+end
+
+local function assign_share(u, p)
+  sh("mkdir -p "..shq(p).." 2>/dev/null")
+  sh("chown -R "..shq(u)..":"..shq(u).." "..shq(p).." 2>/dev/null")
+  local idx = find_share(u)
+  if idx then
+    uci_set("samba4.@sambashare["..idx.."].path", p)
+    uci_set("samba4.@sambashare["..idx.."].users", u)
+  else
+    sh("uci add samba4 sambashare")
+    uci_set("samba4.@sambashare[-1].name", u)
+    uci_set("samba4.@sambashare[-1].path", p)
+    uci_set("samba4.@sambashare[-1].users", u)
+    uci_set("samba4.@sambashare[-1].read_only", "no")
+    uci_set("samba4.@sambashare[-1].guest_ok", "no")
+    uci_set("samba4.@sambashare[-1].create_mask", "0666")
+    uci_set("samba4.@sambashare[-1].dir_mask", "0777")
+  end
+  uci_commit("samba4")
+  sh("/etc/init.d/samba4 restart >/dev/null 2>&1")
+end
+
+local function default_path(u)
+  if trim(sh("[ -d /mnt/nvme ] && echo y")) == "y" then return "/mnt/nvme/"..u end
+  return "/mnt/"..u
+end
+
 function R.samba_users()
   local users = {}
   for line in sh("pdbedit -L 2>/dev/null"):gmatch("[^\n]+") do
     local u = line:match("^([^:]+):")
-    if u and u ~= "" then users[#users+1] = u end
+    if u and u ~= "" then
+      local idx = find_share(u)
+      local path = idx and uci_get("samba4", "@sambashare["..idx.."]", "path") or ""
+      users[#users+1] = { name = u, path = path }
+    end
   end
   return { users = users }
 end
@@ -431,13 +472,33 @@ function R.samba_user_add()
   end
   local out = sh("printf '%s\\n%s\\n' "..shq(p).." "..shq(p).." | smbpasswd -a -s "..shq(u).." 2>&1")
   local cnt = trim(sh("pdbedit -L 2>/dev/null | grep -c '^"..u..":'"))
+  local ok = (cnt ~= "" and cnt ~= "0")
+  if ok then
+    local path = qs.path or ""
+    if path == "" then path = default_path(u) end
+    assign_share(u, path)
+  end
   sh("/etc/init.d/samba4 restart >/dev/null 2>&1")
-  return { ok = (cnt ~= "" and cnt ~= "0"), output = out }
+  return { ok = ok, output = out }
+end
+
+function R.samba_assign()
+  local u = qs.user or ""
+  local p = qs.path or ""
+  if not u:match("^[%w_%-]+$") then return { ok=false, error="bad user" } end
+  if not p:match("^/mnt/[%w%._/%-]+$") or p:find("%.%.") then
+    return { ok=false, error="path must be under /mnt" }
+  end
+  if trim(sh("id -u "..shq(u).." 2>/dev/null")) == "" then return { ok=false, error="user not found" } end
+  assign_share(u, p)
+  return { ok=true, path=p }
 end
 
 function R.samba_user_del()
   local u = qs.user or ""
   if not u:match("^[%w_%-]+$") then return { ok=false } end
+  local idx = find_share(u)
+  if idx then sh("uci delete samba4.@sambashare["..idx.."]"); uci_commit("samba4") end
   sh("smbpasswd -x "..shq(u).." >/dev/null 2>&1")
   sh("userdel "..shq(u).." >/dev/null 2>&1")
   sh("/etc/init.d/samba4 restart >/dev/null 2>&1")
@@ -643,11 +704,13 @@ function R.remote_access_set()
       sh("uci add firewall rule")
       uci_set("firewall.@rule[-1].name", REMOTE_RULE)
       uci_set("firewall.@rule[-1].src", "wan")
-      uci_set("firewall.@rule[-1].src_ip", "192.168.100.0/24")
       uci_set("firewall.@rule[-1].proto", "tcp")
       uci_set("firewall.@rule[-1].dest_port", "80 443")
       uci_set("firewall.@rule[-1].target", "ACCEPT")
       uci_commit("firewall")
+    else
+      -- ensure no stale hard-coded source restriction remains
+      sh("uci -q delete firewall."..sec..".src_ip; uci commit firewall")
     end
     uci_set("uhttpd.main.rfc1918_filter", "0"); uci_commit("uhttpd")
   else

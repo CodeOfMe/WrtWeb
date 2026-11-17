@@ -475,8 +475,15 @@
   VIEWS.nas = async function () {
     const [d, su] = await Promise.all([apiGet("nas"), apiGet("samba_users")]);
     const users = arr(su.users);
-    const userRows = users.map(u => `<div class="list-item"><div class="grow"><strong>${esc(u)}</strong></div>
-      <button class="ghost" data-su-del="${esc(u)}">${esc(t("remove"))}</button></div>`).join("");
+    const userRows = users.map(x => `<div style="border-bottom:1px solid var(--line);padding:10px 0">
+      <div class="row">
+        <div><label>${esc(t("username", "v"))}</label><input value="${esc(x.name)}" readonly></div>
+        <div><label>${esc(t("storage_path", "v"))}</label><input data-su-path="${esc(x.name)}" value="${esc(x.path || ("/mnt/nvme/" + x.name))}"></div>
+      </div>
+      <div class="btn-row">
+        <button data-su-assign="${esc(x.name)}">${esc(t("assign", "v"))}</button>
+        <button class="ghost" data-su-del="${esc(x.name)}">${esc(t("remove"))}</button>
+      </div></div>`).join("");
     return wrap(`
       <div class="card"><h2>${esc(t("nas", "nav"))}</h2>
         <div class="grid">${stat(t("samba", "v"), d.samba_enabled === "1" ? t("enabled") : t("disabled"))}</div>
@@ -493,6 +500,7 @@
         <div class="row">
           <div><label>${esc(t("username", "v"))}</label><input id="su-user" autocomplete="off"></div>
           <div><label>${esc(t("password"))}</label><input id="su-pass" type="password" autocomplete="new-password"></div>
+          <div><label>${esc(t("storage_path", "v"))}</label><input id="su-path" placeholder="/mnt/nvme/user"></div>
         </div>
         <div class="btn-row"><button id="su-add">${esc(t("add_user", "v"))}</button></div>
         <p class="muted small">${esc(t("samba_users_note", "v"))}</p>
@@ -505,12 +513,22 @@
     const add = $("#su-add");
     if (add) add.onclick = async () => {
       const user = $("#su-user").value.trim(), pass = $("#su-pass").value;
+      const path = $("#su-path") ? $("#su-path").value.trim() : "";
       if (!user) return toast(t("username", "v"), "err");
       if (pass.length < 5) return toast(t("pw_min", "v"), "err");
-      const r = await apiPost("samba_user_add", { user, pass });
+      const r = await apiPost("samba_user_add", { user, pass, path });
       toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
       if (r.ok) render();
     };
+    document.querySelectorAll("[data-su-assign]").forEach(b => {
+      b.onclick = async () => {
+        const u = b.getAttribute("data-su-assign");
+        const inp = document.querySelector(`[data-su-path="${u}"]`);
+        const r = await apiPost("samba_assign", { user: u, path: inp ? inp.value.trim() : "" });
+        toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+        if (r.ok) render();
+      };
+    });
     document.querySelectorAll("[data-su-del]").forEach(b => {
       b.onclick = async () => {
         const r = await apiPost("samba_user_del", { user: b.getAttribute("data-su-del") });
