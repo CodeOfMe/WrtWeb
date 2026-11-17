@@ -156,8 +156,9 @@ function R.overview()
   local wandev = jf('@.device'); if wandev == "" then wandev = "eth0" end
   local wanmac = trim(sh("cat /sys/class/net/"..wandev.."/address 2>/dev/null"))
   local wanup = tonumber(jf('@.uptime')) or 0
-  local wanrx = tonumber(jf('@.statistics.rx_bytes')) or 0
-  local wantx = tonumber(jf('@.statistics.tx_bytes')) or 0
+  -- netifd's status has no statistics section, so read the counters from sysfs
+  local wanrx = tonumber(jf('@.statistics.rx_bytes')) or tonumber(sh("cat /sys/class/net/"..wandev.."/statistics/rx_bytes 2>/dev/null")) or 0
+  local wantx = tonumber(jf('@.statistics.tx_bytes')) or tonumber(sh("cat /sys/class/net/"..wandev.."/statistics/tx_bytes 2>/dev/null")) or 0
   local wandns = jf('@["dns-server"][0]')
   -- dhcp leases
   local leases = {}

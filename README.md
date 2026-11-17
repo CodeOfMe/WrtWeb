@@ -69,6 +69,8 @@ JSON via a built-in encoder, so it works on both `opkg` and `apk` releases.
 ```sh
 # 25.x / 24.10 (apk)
 apk update && apk add wrtweb
+# a locally built .apk is unsigned, so:
+apk add --allow-untrusted wrtweb_<ver>_all.apk
 # 23.05 and older (ipk)
 opkg update && opkg install wrtweb_*.ipk
 # then
@@ -94,7 +96,8 @@ python3 scripts/build_pkg.py
 Produces in `dist/`:
 - `wrtweb_<ver>_all.ipk` — for opkg-based OpenWrt (<= 23.05)
 - `wrtweb-<ver>-universal.tar.gz` — universal installer (`./install.sh`), works on opkg **and** apk (24.10/25.x) systems
-- `wrtweb_<ver>_all.apk` — Alpine v2 reference (OpenWrt 24.10+ needs APK v3 from the OpenWrt buildroot)
+- `wrtweb_<ver>_all.apk` — APK v3 (ADB format), written directly by `scripts/adb_writer.py`;
+  apk-tools 3 (OpenWrt 24.10+) rejects v2 packages, so this is the one that installs
 
 
 ## Requirements on the router
