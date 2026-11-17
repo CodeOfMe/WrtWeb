@@ -294,8 +294,11 @@
   };
 
   VIEWS.internet = async function () {
-    const [ov, nets] = await Promise.all([apiGet("overview"), apiGet("repeater_scan")]);
+    const [ov, nets, ifc] = await Promise.all([apiGet("overview"), apiGet("repeater_scan"), apiGet("network")]);
     const list = arr(nets.networks);
+    const ifrows = arr(ifc.interfaces).map(i => `<tr><td>${esc(i.name)}</td>
+      <td><span class="tag ${i.up ? "on" : "off"}">${esc(i.up ? t("on") : t("off"))}</span></td>
+      <td>${esc(i.ip || "-")}</td></tr>`).join("");
     let rows = list.length
       ? list.map(n => `<div class="list-item">
           <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
@@ -309,7 +312,10 @@
         <div class="grid">
           ${stat(t("wan_ip"), ov.wan_ip || "-")}
           ${stat(t("wan_proto", "v"), ov.wan_proto || "-")}
+          ${stat(t("clients", "nav"), ov.clients || 0)}
         </div>
+        <table><thead><tr><th>${esc(t("interfaces", "v"))}</th><th>${esc(t("status"))}</th><th>IP</th></tr></thead>
+        <tbody>${ifrows || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       </div>
       <div class="card"><h2>${esc(t("repeater_title", "v"))}</h2>
         <p class="muted small">${esc(t("repeater_note", "v"))}</p>
@@ -484,7 +490,9 @@
   VIEWS.wireless = async function () {
     const d = await apiGet("wireless");
     const ifaces = arr(d.ifaces).map(i => `<div class="card">
-      <h2>${esc(i.ssid || i.name)} <span class="tag">${esc(i.device || "")}</span></h2>
+      <h2>${esc(i.ssid || i.name)} <span class="tag">${esc(i.band || i.device || "")}</span>
+        <span class="tag ${i.stations ? "on" : ""}">${esc(t("stations", "v"))}: ${esc(i.stations || 0)}</span></h2>
+      <p class="small muted">${esc(i.iface || t("unknown", "v"))} · ${esc(t("channel", "v"))} ${esc(i.channel || "-")}${i.width ? " · " + esc(i.width) + " MHz" : ""}${i.txpower ? " · " + esc(i.txpower) + " dBm" : ""}</p>
       <div class="row">
         <div><label>${esc(t("ssid"))}</label><input data-f="ssid" data-sec="${esc(i.name)}" value="${esc(i.ssid||"")}"></div>
         <div><label>${esc(t("password"))}</label><input data-f="key" data-sec="${esc(i.name)}" type="password" value="${esc(i.key||"")}"></div>
@@ -585,7 +593,7 @@
     const d = await apiGet("adguard");
     return wrap(`<div class="card"><h2>${esc(t("adguard", "nav"))}</h2>
       <div class="grid">
-        ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+        ${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
       <div class="btn-row">
@@ -670,7 +678,7 @@
 
   VIEWS.ddns = async function () {
     const d = await apiGet("ddns");
-    const rows = arr(d.services).map(s=>`<tr><td>${esc(s.service)}</td><td>${esc(s.domain)}</td><td>${esc(s.enabled)}</td></tr>`).join("");
+    const rows = arr(d.services).map(s=>`<tr><td>${esc(s.service || "-")}</td><td>${esc(s.domain || "-")}</td><td><span class="tag ${s.enabled === "1" ? "on" : "off"}">${esc(s.enabled === "1" ? t("on") : t("off"))}</span></td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("ddns", "nav"))}</h2>
       <table><thead><tr><th>${esc(t("service", "v"))}</th><th>${esc(t("domain", "v"))}</th><th>${esc(t("enabled"))}</th></tr></thead>
       <tbody>${rows||`<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
@@ -696,14 +704,26 @@
     const d = await apiGet("clash");
     return wrap(`<div class="card"><h2>${esc(t("clash", "nav"))}</h2>
       <div class="grid">
-        ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+        ${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
-      ${serviceBtns("mihomo", "http://" + location.hostname + ":9090/ui/")}
+      ${d.installed ? `<div class="btn-row">
+        <button data-clash="start">${esc(t("start", "v"))}</button>
+        <button class="ghost" data-clash="stop">${esc(t("stop", "v"))}</button>
+        <a class="ghost" style="padding:9px 16px;border-radius:9px" href="http://${location.hostname}:9090/ui/">${esc(t("open_ui", "v"))}</a>
+      </div>` : ""}
       <p class="muted small">${esc(t("clash_note", "v"))}</p>
     </div>`);
   };
-  VIEWS.clash.mount = bindSvc;
+  VIEWS.clash.mount = function () {
+    document.querySelectorAll("[data-clash]").forEach(b => {
+      b.onclick = async () => {
+        const r = await apiPost("clash_set", { action: b.getAttribute("data-clash") });
+        toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+        if (r.ok) render();
+      };
+    });
+  };
 
   VIEWS.remote = async function () {
     const [d, s] = await Promise.all([apiGet("remote_access"), apiGet("remote_ssh")]);
@@ -877,7 +897,7 @@
       const d = await apiGet("service", { s: key });
       return wrap(`<div class="card"><h2>${esc(t(key, "nav"))}</h2>
         <div class="grid">
-          ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+          ${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}
           ${stat(t("status"), d.running ? t("running") : t("stopped"))}
         </div>
         ${serviceBtns(key, cfg)}
@@ -892,7 +912,7 @@
     const d = await apiGet("mwan");
     return wrap(`<div class="card"><h2>${esc(t("multiwan", "nav"))}</h2>
       <div class="grid">
-        ${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}
+        ${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}
         ${stat(t("status"), d.running ? t("running") : t("stopped"))}
       </div>
       ${serviceBtns("mwan3", "/cgi-bin/luci/admin/network/mwan3")}
@@ -909,30 +929,84 @@
       <table><thead><tr><th>${esc(t("wg_iface", "v"))}</th><th>${esc(t("peers", "v"))}</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <p class="small muted">${esc(t("wg_hint", "v"))}</p>
-      <div class="btn-row"><a class="ghost" style="padding:9px 16px;border-radius:9px" href="/cgi-bin/luci/admin/network/network" target="_blank">LuCI</a></div>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
     </div>`);
   };
-  VIEWS.wgserver = VIEWS.wgclient;
+
+  VIEWS.wgserver = async function () {
+    const d = await apiGet("vpn");
+    const rows = arr(d.wireguard).map(w => `<tr><td>${esc(w.iface)}</td><td>${esc(w.port || "-")}</td>
+      <td class="small">${esc(w.key || "-")}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("wgserver", "nav"))}</h2>
+      <div class="grid">${stat("WireGuard", d.wg_installed ? t("installed") : t("not_installed"))}</div>
+      <table><thead><tr><th>${esc(t("wg_iface", "v"))}</th><th>${esc(t("listen_port", "v"))}</th><th>${esc(t("public_key", "v"))}</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("wg_server_hint", "v"))}</p>
+      <div class="btn-row">${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
+    </div>`);
+  };
 
   VIEWS.ovpnclient = async function () {
     const [d, o] = await Promise.all([apiGet("vpn"), apiGet("ovpn")]);
+    const files = arr(o.files).map(f => `<tr><td>${esc(f)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("ovpnclient", "nav"))}</h2>
-      <div class="grid">${stat("OpenVPN", d.ovpn_installed ? t("installed") : t("not_installed"))}</div>
+      <div class="grid">${stat("OpenVPN", d.ovpn_installed ? t("installed") : t("not_installed"))}
+        ${stat(t("profiles", "v"), o.count || 0)}</div>
       ${serviceBtns("openvpn", "/cgi-bin/luci/admin/vpn/openvpn")}
-      <p class="small muted">${esc(t("profiles", "v"))}: ${esc(o.files || t("none"))}</p>
+      <table><thead><tr><th>${esc(t("profiles", "v"))}</th></tr></thead>
+      <tbody>${files || `<tr><td class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <p class="small muted">${esc(t("ovpn_hint", "v"))}</p>
     </div>`);
   };
   VIEWS.ovpnclient.mount = bindSvc;
-  VIEWS.ovpnserver = VIEWS.ovpnclient;
+
+  VIEWS.ovpnserver = async function () {
+    const [d, o] = await Promise.all([apiGet("vpn"), apiGet("ovpn")]);
+    const files = arr(o.files).map(f => `<tr><td>${esc(f)}</td></tr>`).join("");
+    return wrap(`<div class="card"><h2>${esc(t("ovpnserver", "nav"))}</h2>
+      <div class="grid">${stat("OpenVPN", d.ovpn_installed ? t("installed") : t("not_installed"))}
+        ${stat(t("profiles", "v"), o.count || 0)}</div>
+      ${serviceBtns("openvpn", "/cgi-bin/luci/admin/vpn/openvpn")}
+      <table><thead><tr><th>${esc(t("profiles", "v"))}</th></tr></thead>
+      <tbody>${files || `<tr><td class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <p class="small muted">${esc(t("ovpn_server_hint", "v"))}</p>
+    </div>`);
+  };
+  VIEWS.ovpnserver.mount = bindSvc;
 
   VIEWS.tor = serviceView("tor", "tor", "/cgi-bin/luci/admin/services/tor");
-  VIEWS.tailscale = serviceView("tailscale", "tailscale", "/cgi-bin/luci/admin/network/network");
+
+  VIEWS.tailscale = async function () {
+    const d = await apiGet("tailscale");
+    return wrap(`<div class="card"><h2>${esc(t("tailscale", "nav"))}</h2>
+      <div class="grid">
+        ${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}
+        ${stat(t("status"), d.backend || t("stopped"))}
+        ${stat("Tailscale IP", d.ip || "-")}
+      </div>
+      ${d.installed ? `<div class="btn-row">
+        <button data-tailscale="up">${esc(t("connect"))}</button>
+        <button class="ghost" data-tailscale="down">${esc(t("disconnect", "v"))}</button>
+        ${cfgBtn("/cgi-bin/luci/admin/network/network")}
+      </div>` : ""}
+      ${d.status ? `<pre class="log">${esc(d.status)}</pre>` : ""}
+      ${!d.installed ? `<p class="small muted">${esc(t("requires_pkg", "v"))}: <code>tailscale</code></p>` : ""}
+    </div>`);
+  };
+  VIEWS.tailscale.mount = function () {
+    document.querySelectorAll("[data-tailscale]").forEach(b => {
+      b.onclick = async () => {
+        const r = await apiPost("tailscale_set", { action: b.getAttribute("data-tailscale") });
+        toast(r.ok ? t("saved") : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
+        if (r.ok) render();
+      };
+    });
+  };
 
   VIEWS.zerotier = async function () {
     const d = await apiGet("zerotier");
     return wrap(`<div class="card"><h2>${esc(t("zerotier", "nav"))}</h2>
-      <div class="grid">${stat(t("installed"), d.installed ? t("installed") : t("not_installed"))}${stat(t("running"), d.running ? t("running") : t("stopped"))}</div>
+      <div class="grid">${stat(t("package", "v"), d.installed ? t("installed") : t("not_installed"))}${stat(t("status"), d.running ? t("running") : t("stopped"))}</div>
       <pre class="log">${esc((d.info || "") + "\n" + (d.networks || "")) || esc(t("none"))}</pre>
       <div class="row"><div><label>Network ID</label><input id="zt-nwid" placeholder="8056c2e21c000001"></div></div>
       <div class="btn-row"><button id="zt-join">${esc(t("connect"))}</button>${cfgBtn("/cgi-bin/luci/admin/network/network")}</div>
@@ -1096,9 +1170,21 @@
     };
   };
 
+  const KNOWN_PORTS = {
+    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 67: "DHCP", 80: "HTTP",
+    110: "POP3", 123: "NTP", 139: "SMB", 143: "IMAP", 443: "HTTPS", 445: "SMB",
+    514: "Syslog", 631: "CUPS", 853: "DNS over TLS", 9090: "Metrics", 9091: "AdGuard API",
+    1194: "OpenVPN", 3000: "TTYD", 7681: "AdGuard UI", 7890: "Clash", 9050: "Tor SOCKS",
+    51820: "WireGuard"
+  };
+
   VIEWS.security = async function () {
     const d = await apiGet("security");
-    const ports = arr(d.listening).map(p => `<tr><td>${esc(p.addr)}</td><td>${esc(p.port)}</td></tr>`).join("");
+    const byPort = {};
+    arr(d.listening).forEach(p => { (byPort[p.port] = byPort[p.port] || []).push(p.addr); });
+    const ports = Object.keys(byPort).sort((a, b) => Number(a) - Number(b)).map(port => `<tr>
+      <td>${esc(port)}</td><td>${esc(KNOWN_PORTS[port] || t("unknown", "v"))}</td>
+      <td class="small muted">${esc(byPort[port].join(", "))}</td></tr>`).join("");
     const shell = arr(d.shell_access).map(s => `<tr><td>${esc(s.interface)}</td><td>${esc(s.port)}</td></tr>`).join("");
     return wrap(`<div class="card"><h2>${esc(t("security", "nav"))}</h2>
       <div class="grid">
@@ -1109,8 +1195,8 @@
       </div>
       <table><thead><tr><th>${esc(t("shell_access", "v"))}</th><th>${esc(t("port", "v"))}</th></tr></thead>
       <tbody>${shell || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
-      <table><thead><tr><th>${esc(t("listening_ports", "v"))}</th><th></th></tr></thead>
-      <tbody>${ports || `<tr><td colspan="2" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
+      <table><thead><tr><th>${esc(t("port", "v"))}</th><th>${esc(t("service", "v"))}</th><th>${esc(t("addresses", "v"))}</th></tr></thead>
+      <tbody>${ports || `<tr><td colspan="3" class="muted">${esc(t("none"))}</td></tr>`}</tbody></table>
       <p class="small muted">${esc(t("pw_note", "v"))}</p>
       <div class="btn-row">
         <a class="ghost" style="padding:9px 16px;border-radius:9px" href="#/remote">${esc(t("remote", "nav"))} ›</a>

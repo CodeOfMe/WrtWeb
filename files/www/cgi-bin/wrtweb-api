@@ -225,28 +225,43 @@ function R.overview()
   }
 end
 
--- clients list with connection method, band, signal and rates
-function R.clients()
-  -- wireless interfaces: band, channel, width, tx power
-  local iface_info, cur = {}, nil
+-- live wireless interfaces from `iw dev`: band, channel, width, tx power, stations
+local function iw_ifaces()
+  local out, cur = {}, nil
   for line in sh("iw dev 2>/dev/null"):gmatch("[^\n]+") do
     local ifn = line:match("Interface (%S+)")
     if ifn then
-      cur = ifn
-      iface_info[ifn] = { iface = ifn, band = "", channel = 0, width = "", txpower = "" }
+      cur = { iface = ifn, band = "", channel = 0, width = "", txpower = "", ssid = "" }
+      out[ifn] = cur
     end
     if cur then
       local ch, freq, width = line:match("channel (%d+) %((%d+) MHz%), width: (%S+)")
       if ch then
         local f = tonumber(freq) or 0
-        iface_info[cur].band = (f >= 6000 and "6 GHz") or (f >= 4800 and "5 GHz") or "2.4 GHz"
-        iface_info[cur].channel = tonumber(ch) or 0
-        iface_info[cur].width = width or ""
+        cur.band = (f >= 6000 and "6 GHz") or (f >= 4800 and "5 GHz") or "2.4 GHz"
+        cur.channel = tonumber(ch) or 0
+        cur.width = width or ""
       end
       local txp = line:match("txpower (%S+) dBm")
-      if txp then iface_info[cur].txpower = txp end
+      if txp then cur.txpower = txp end
+      local ssid = line:match("ssid (.*)")
+      if ssid and ssid ~= "" then cur.ssid = ssid end
     end
   end
+  for ifn, i in pairs(out) do
+    local n = 0
+    for line in sh("iw dev " .. ifn .. " station dump 2>/dev/null"):gmatch("[^\n]+") do
+      if line:match("^Station ") then n = n + 1 end
+    end
+    i.stations = n
+  end
+  return out
+end
+
+-- clients list with connection method, band, signal and rates
+function R.clients()
+  -- wireless interfaces: band, channel, width, tx power
+  local iface_info = iw_ifaces()
 
   local stations = {}
   for ifn in pairs(iface_info) do
@@ -366,18 +381,34 @@ function R.clients()
   return { clients = list, total = #list, wifi = wifi_n, wired = wired_n }
 end
 
--- wireless radios + ssids
+-- wireless radios + ssids, matched to the live interface names netifd reports
 function R.wireless()
+  local iw = iw_ifaces()
+  local status = sh("ubus call network.wireless status 2>/dev/null")
   local radios, ifaces = {}, {}
   for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)=wifi%-device") do
     radios[#radios+1] = { name=sec, channel=uci_get("wireless",sec,"channel"),
       band=uci_get("wireless",sec,"band"), disabled=uci_get("wireless",sec,"disabled") }
   end
   for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
-    ifaces[#ifaces+1] = { name=sec, ssid=uci_get("wireless",sec,"ssid"),
+    local ssid = uci_get("wireless",sec,"ssid")
+    local dev = uci_get("wireless",sec,"device")
+    local live = nil
+    -- netifd reports the interface name for each radio section; SSID match is the fallback
+    if status ~= "" and dev ~= "" then
+      local ifn = trim(sh("printf '%s' " .. shq(status) .. " | jsonfilter -e " .. shq("@." .. dev .. ".interfaces[0].ifname")))
+      live = iw[ifn]
+    end
+    if not live then
+      for _, i in pairs(iw) do if i.ssid == ssid then live = i break end end
+    end
+    ifaces[#ifaces+1] = { name=sec, ssid=ssid,
       key=uci_get("wireless",sec,"key"), encryption=uci_get("wireless",sec,"encryption"),
-      device=uci_get("wireless",sec,"device"), network=uci_get("wireless",sec,"network"),
-      hidden=uci_get("wireless",sec,"hidden") }
+      device=dev, network=uci_get("wireless",sec,"network"),
+      hidden=uci_get("wireless",sec,"hidden"),
+      iface=(live and live.iface or ""), band=(live and live.band or ""),
+      channel=(live and live.channel or 0), width=(live and live.width or ""),
+      txpower=(live and live.txpower or ""), stations=(live and live.stations or 0) }
   end
   return { radios=radios, ifaces=ifaces }
 end
@@ -734,7 +765,11 @@ end
 function R.vpn()
   local wg = {}
   for ifn in sh("wg show interfaces 2>/dev/null"):gmatch("%S+") do
-    wg[#wg+1] = { iface=ifn, peers=#sh("wg show "..ifn.." peers 2>/dev/null") }
+    local peers = 0
+    for _ in sh("wg show " .. ifn .. " peers 2>/dev/null"):gmatch("[^\n]+") do peers = peers + 1 end
+    wg[#wg + 1] = { iface = ifn, peers = peers,
+                    port = trim(sh("wg show " .. ifn .. " listen-port 2>/dev/null")),
+                    key = trim(sh("wg show " .. ifn .. " public-key 2>/dev/null")) }
   end
   local ovpn = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null | wc -l"))
   return { wireguard=wg, ovpn_count=tonumber(ovpn) or 0,
@@ -890,7 +925,11 @@ end
 
 -- OpenVPN profile listing
 function R.ovpn()
-  return { files = trim(sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null")) }
+  local files = {}
+  for line in sh("ls /etc/openvpn/*.ovpn /etc/openvpn/*.conf 2>/dev/null"):gmatch("[^\n]+") do
+    files[#files + 1] = line:gsub("^/etc/openvpn/", "")
+  end
+  return { files = files, count = #files }
 end
 
 -- Remote WrtWeb access from the WAN side (hosts outside the LAN subnet)
@@ -1358,7 +1397,7 @@ function R.advanced()
     },
     swap = swap_rows > 1,
     irqbalance = trim(sh("command -v irqbalance")) ~= "",
-    load = proc_num("/proc/loadavg"),
+    load = trim(sh("cut -d' ' -f1-3 /proc/loadavg 2>/dev/null")),
   }
 end
 

@@ -115,7 +115,11 @@ window.I18N = {
       up_to_date:"Everything is up to date",
       upgrade_note:"Flash a sysupgrade image in LuCI (System → Backup / Flash Firmware); the package list here is read live from the router.",
       blocked:"Blocked", allowed:"Allowed", block:"Block", unblock:"Unblock",
-      parental_note:"One firewall rule per device MAC; Block drops that device in the LAN zone."
+      parental_note:"One firewall rule per device MAC; Block drops that device in the LAN zone.",
+      addresses:"Addresses", interfaces:"Interfaces", channel:"Channel",
+      listen_port:"Listen port", public_key:"Public key", unknown:"Unknown", disconnect:"Disconnect",
+      wg_server_hint:"The listen port and public key come from `wg show` for each WireGuard interface.",
+      ovpn_server_hint:"Server profiles live in /etc/openvpn; a client imports the .ovpn file to connect."
     }
   },
   zh: {
@@ -233,7 +237,11 @@ window.I18N = {
       up_to_date:"全部已是最新",
       upgrade_note:"在 LuCI（系统 → 备份/闪存）刷写 sysupgrade 镜像；这里的软件包列表是从路由器实时读取的。",
       blocked:"已拦截", allowed:"允许", block:"拦截", unblock:"放行",
-      parental_note:"每个设备 MAC 对应一条防火墙规则；拦截即在 lan 区域丢弃该设备流量。"
+      parental_note:"每个设备 MAC 对应一条防火墙规则；拦截即在 lan 区域丢弃该设备流量。",
+      addresses:"地址", interfaces:"接口", channel:"信道",
+      listen_port:"监听端口", public_key:"公钥", unknown:"未知", disconnect:"断开",
+      wg_server_hint:"每个 WireGuard 接口的监听端口与公钥来自 `wg show`。",
+      ovpn_server_hint:"服务端配置位于 /etc/openvpn，客户端导入 .ovpn 文件即可连接。"
     }
   }
 };
