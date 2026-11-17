@@ -56,6 +56,13 @@ local function sec_ref(s)
   return tostring(s or ""):gsub("[^%w%-_@%[%]]", "")
 end
 
+-- a MAC in the AA:BB:CC:DD:EE:FF form
+local function norm_mac(s)
+  s = tostring(s or ""):upper()
+  if #s == 17 and s:match("^[%x:]+$") then return s end
+  return nil
+end
+
 -- what iwinfo reports in a scan -> the crypto name netifd expects
 local function crypto_for(scan_enc)
   -- a value already in netifd's form is used as-is; otherwise map what iwinfo reports
@@ -533,27 +540,76 @@ end
 
 -- Repeater: scan + join
 function R.repeater_scan()
-  local nets, seen = {}, {}
+  -- ifname -> wifi-device section, so each row can say which radio found it
+  local iface_radio = {}
+  for s, n in sh("ubus call network.wireless status 2>/dev/null"):gmatch(
+      '"section"%s*:%s*"([^"]+)"%s*.-%s*"ifname"%s*:%s*"([^"]+)"') do
+    iface_radio[n] = s
+  end
+
+  local nets = {}
+  local radios = 0
   for ifn in sh("iw dev"):gmatch("Interface (%S+)") do
-    local out_s = sh("iwinfo "..ifn.." scan")
+    radios = radios + 1
     local cur
-    for line in out_s:gmatch("[^\n]+") do
+    for line in sh("iwinfo " .. shq(ifn) .. " scan 2>/dev/null"):gmatch("[^\n]+") do
+      -- a new cell starts a record; the previous one is complete here
       local cell = line:match("Cell %d+ %- Address: (%S+)")
-      if cell then cur = { bssid=cell } end
-      local essid = line:match('ESSID: "(.-)"')
-      if essid and cur then cur.ssid = essid end
-      local sig = line:match("Signal: (%-?%d+) dBm")
-      if sig and cur then cur.signal = tonumber(sig) end
-      local enc = line:match("Encryption: (%S+)")
-      if enc and cur then
-        cur.encryption = enc
-        if cur.ssid and not seen[cur.ssid] then seen[cur.ssid]=true; nets[#nets+1]=cur end
-        cur = nil
+      if cell then
+        if cur and cur.bssid then nets[#nets + 1] = cur end
+        cur = { bssid = cell:lower(), iface = ifn, radio = iface_radio[ifn] or "" }
+      end
+      if cur then
+        local essid = line:match('ESSID: "(.-)"')
+        if essid and essid ~= "unknown" then cur.ssid = essid end
+        if line:match("Mode: Master") then cur.mode = "ap" end
+        local sig = line:match("Signal: (%-?%d+) dBm")
+        if sig then cur.signal = tonumber(sig) end
+        local q = line:match("Quality: (%d+/%d+)")
+        if q then cur.quality = q end
+        local ch = line:match("Channel: (%d+)")
+        if ch then cur.channel = tonumber(ch) end
+        local band = line:match("Band: (.-)%s+Channel")
+        if band then cur.band = trim(band) end
+        local enc = line:match("Encryption: (%S+)")
+        if enc then cur.encryption = enc end
       end
     end
-    if #nets > 0 then break end
+    if cur and cur.bssid then nets[#nets + 1] = cur end
   end
-  return { networks=nets }
+
+  -- only access points can be joined, and one SSID may have several of them
+  local aps = {}
+  for _, n in ipairs(nets) do
+    if n.mode == "ap" then aps[#aps + 1] = n end
+  end
+  table.sort(aps, function(a, b) return (a.signal or 0) > (b.signal or 0) end)
+
+  local total = #aps
+  if total > 60 then
+    local kept = {}
+    for i = 1, 60 do kept[i] = aps[i] end
+    aps = kept
+  end
+
+  local groups, byssid = {}, {}
+  for _, n in ipairs(aps) do
+    local key = n.ssid or "(hidden)"
+    local g = byssid[key]
+    if not g then
+      g = { ssid = key, aps = {} }
+      byssid[key] = g
+      groups[#groups + 1] = g
+    end
+    g.aps[#g.aps + 1] = n
+  end
+  for _, g in ipairs(groups) do
+    g.count = #g.aps
+    g.best = g.aps[1].bssid
+    g.encryption = g.aps[1].encryption or ""
+  end
+
+  return { networks = aps, groups = groups, total = total, radios = radios }
 end
 
 -- UCI section of the station (client) interface, its live interface name and radio
@@ -609,19 +665,28 @@ function R.repeater_join()
   if ssid == "" then return { ok=false, error="missing ssid" } end
   local enc = crypto_for(qs.encryption or "psk2")
   local _, _, dev = sta_iface()
-  local radio = qs.radio or ""
+  -- the radio of the access point that was picked, not whatever the form holds
+  local radio = sec_ref(qs.radio or "")
   if radio == "" then radio = dev end
   if radio == "" then
     for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)=wifi%-device") do radio = name break end
   end
+  -- `device=` must name a wifi-device section, otherwise netifd cannot bring the link up
+  if not sh("uci -q show wireless." .. radio):match("wifi%-device") then
+    return { ok=false, error="radio not found: " .. radio }
+  end
+  local bssid = norm_mac(qs.bssid)
 
   uci_set("wrtweb.repeater.enabled", "1")
   uci_set("wrtweb.repeater.mode", "client")
   uci_set("wrtweb.repeater.ssid", ssid)
-  if (qs.key or "") ~= "" then uci_set("wrtweb.repeater.key", qs.key) end
+  if (qs.key or "") ~= "" and enc ~= "none" then uci_set("wrtweb.repeater.key", qs.key)
+  else sh("uci -q delete wrtweb.repeater.key >/dev/null 2>&1") end
   uci_set("wrtweb.repeater.encryption", enc)
   uci_set("wrtweb.repeater.radio", radio)
-  if (qs.bssid or "") ~= "" then uci_set("wrtweb.repeater.bssid", qs.bssid) end
+  -- an empty bssid clears the pin, otherwise a previous pin keeps steering the link
+  if bssid then uci_set("wrtweb.repeater.bssid", bssid)
+  else sh("uci -q delete wrtweb.repeater.bssid >/dev/null 2>&1") end
   if qs.auto ~= "" then uci_set("wrtweb.repeater.auto", qs.auto) end
   uci_commit("wrtweb")
 
@@ -1681,12 +1746,6 @@ end
 
 -- Parental control: one firewall rule per device MAC.
 local PARENT_PREFIX = "Parental-"
-
-local function norm_mac(s)
-  s = tostring(s or ""):upper()
-  if #s == 17 and s:match("^[%x:]+$") then return s end
-  return nil
-end
 
 local function parental_rule(mac)
   for name, s in pairs(uci_sections("firewall")) do

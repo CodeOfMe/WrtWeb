@@ -315,6 +315,27 @@
       </div>`);
   };
 
+  // one SSID can have several access points; list them all so the best one can be picked
+  function scanHtml(scan, pinned) {
+    const groups = arr(scan.groups);
+    return groups.map(g => {
+      const rows = arr(g.aps).map(n => `<div class="list-item">
+        <div class="grow"><code>${esc(n.bssid || "")}</code>
+          <div class="small muted">${esc(n.signal || 0)} dBm · ${esc(n.quality || "-")} ·
+            ${esc(n.band || "")}${n.channel ? " " + esc(t("channel", "v")) + " " + esc(n.channel) : ""} ·
+            ${esc(n.encryption || "")} · ${esc(n.radio || "")}
+            ${n.bssid === g.best ? " · " + esc(t("best", "v")) : ""}
+            ${n.bssid === pinned ? " · " + esc(t("pinned", "v")) : ""}</div>
+        </div>
+        <button class="ghost" data-join="${esc(g.ssid || "")}" data-enc="${esc(n.encryption || "")}"
+          data-bssid="${esc(n.bssid || "")}" data-radio="${esc(n.radio || "")}">${esc(t("connect"))}</button>
+      </div>`).join("");
+      return `<div style="margin-bottom:12px">
+        <div class="small muted"><strong>${esc(g.ssid || t("hidden_ssid", "v"))}</strong>
+          · ${g.count} ${esc(t("access_points", "v"))}</div>${rows}</div>`;
+    }).join("");
+  }
+
   VIEWS.repeater = async function () {
     const [s, scan] = await Promise.all([apiGet("repeater_status"), apiGet("repeater_scan")]);
     const c = s.config || {};
@@ -322,13 +343,7 @@
     const uh = Math.floor(up / 3600), um = Math.floor((up % 3600) / 60);
     const state = s.connected ? t("connected", "v")
       : (c.enabled === "1" ? t("not_associated", "v") : t("disabled"));
-    const radios = [];
-    const list = arr(scan.networks).map(n => `<div class="list-item">
-      <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
-        <div class="small muted">${esc(n.bssid || "")} · ${esc(n.encryption || "")} · ${esc(n.signal || "")} dBm</div></div>
-      <button class="ghost" data-join="${esc(n.ssid || "")}" data-enc="${esc(n.encryption || "")}"
-        data-bssid="${esc(n.bssid || "")}">${esc(t("connect"))}</button>
-    </div>`).join("");
+    const list = scanHtml(scan, c.bssid || "");
 
     return wrap(`
       <div class="card"><h2>${esc(t("repeater", "nav"))}</h2>
@@ -366,16 +381,17 @@
         <p class="small muted">${esc(t("repeater_page_note", "v"))}</p>
       </div>
       <div class="card"><h2>${esc(t("scan"))}</h2>
+        <p class="small muted">${scan.total || 0} ${esc(t("access_points", "v"))} · ${scan.radios || 0} ${esc(t("radios", "v"))} · ${arr(scan.groups).length} ${esc(t("networks", "v"))}</p>
         <div class="btn-row"><button id="do-scan">${esc(t("scan"))}</button></div>
         <div id="net-list" style="margin-top:12px">${list || `<p class="muted">${esc(t("none"))}</p>`}</div>
       </div>`);
   };
   VIEWS.repeater.mount = function () {
-    const join = async (ssid, enc, bssid) => {
+    const join = async (ssid, enc, bssid, radio) => {
       if (!ssid) return toast(t("ssid_required", "v"), "err");
       const r = await apiPost("repeater_join", {
         ssid, key: $("#rp-key").value, encryption: enc,
-        radio: $("#rp-radio").value, bssid: bssid || "", auto: $("#rp-auto").value });
+        radio: radio || $("#rp-radio").value, bssid: bssid || "", auto: $("#rp-auto").value });
       toast(r.ok ? (r.message || t("saved")) : (r.error || t("failed", "v")), r.ok ? "ok" : "err");
       if (r.ok) render();
     };
@@ -383,11 +399,7 @@
     if (doScan) doScan.onclick = async () => {
       $("#net-list").innerHTML = `<p class="muted">${esc(t("scanning", "v"))}</p>`;
       const d = await apiGet("repeater_scan");
-      $("#net-list").innerHTML = arr(d.networks).map(n => `<div class="list-item">
-        <div class="grow"><strong>${esc(n.ssid || "(hidden)")}</strong>
-          <div class="small muted">${esc(n.bssid || "")} · ${esc(n.encryption || "")} · ${esc(n.signal || "")} dBm</div></div>
-        <button class="ghost" data-join="${esc(n.ssid || "")}" data-enc="${esc(n.encryption || "")}"
-          data-bssid="${esc(n.bssid || "")}">${esc(t("connect"))}</button></div>`).join("")
+      $("#net-list").innerHTML = scanHtml(d, $("#rp-bssid").value)
         || `<p class="muted">${esc(t("none"))}</p>`;
       bind();
     };
@@ -404,7 +416,8 @@
     if (stop) stop.onclick = () => act("stop");
     function bind() {
       document.querySelectorAll("[data-join]").forEach(b => {
-        b.onclick = () => join(b.getAttribute("data-join"), b.getAttribute("data-enc"), b.getAttribute("data-bssid"));
+        b.onclick = () => join(b.getAttribute("data-join"), b.getAttribute("data-enc"),
+          b.getAttribute("data-bssid"), b.getAttribute("data-radio"));
       });
     }
     bind();
