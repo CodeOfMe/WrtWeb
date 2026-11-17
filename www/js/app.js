@@ -1342,7 +1342,8 @@
           <div><label>${esc(t("listen_port", "v"))}</label><input id="wg-port" placeholder="51820"></div>
         </div>
         <div class="btn-row">
-          <button id="wg-new">${esc(t("generate", "v"))}</button>
+          <button id="wg-gen">${esc(t("generate", "v"))}</button>
+          <button id="wg-new">${esc(t("create", "v"))}</button>
           ${d.tools ? "" : `<span class="muted small">${esc(t("requires_pkg", "v"))}: <code>wireguard-tools</code></span>`}
         </div>
         <p class="small muted" id="wg-key"></p>
@@ -1362,13 +1363,20 @@
   VIEWS.astrowarp.mount = function () {
     const run = async (res, body) => {
       const r = await apiPost(res, body);
-      if (r.ok) {
-        if (r.public_key) $("#wg-key").textContent = "public key: " + r.public_key;
-        toast(t("saved")); render();
-      } else toast(r.error || t("failed", "v"), "err");
+      if (r.ok) { toast(t("saved")); render(); }
+      else toast(r.error || t("failed", "v"), "err");
     };
-    const gen = $("#wg-new");
-    if (gen) gen.onclick = () => run("wireguard_new", {
+    const gen = $("#wg-gen");
+    if (gen) gen.onclick = async () => {
+      const r = await apiPost("wireguard_keygen", {});
+      if (!r.ok) return toast(r.error || t("failed", "v"), "err");
+      // the private key stays on the router; only the public key is shown
+      $("#wg-key").textContent = "public key: " + r.public_key;
+      const f = $("#wg-key-in");
+      if (f) f.value = r.public_key;
+    };
+    const create = $("#wg-new");
+    if (create) create.onclick = () => run("wireguard_new", {
       name: $("#wg-name").value, address: $("#wg-addr").value, port: $("#wg-port").value });
     const add = $("#wg-add");
     if (add) add.onclick = () => run("wireguard_peer", {

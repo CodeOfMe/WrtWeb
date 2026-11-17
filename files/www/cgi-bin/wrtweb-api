@@ -51,9 +51,17 @@ local function norm_name(s)
   return tostring(s or ""):gsub("[^%w%-_]", "")
 end
 
+-- a section reference: either a name (wg0) or an anonymous index (@interface[0])
+local function sec_ref(s)
+  return tostring(s or ""):gsub("[^%w%-_@%[%]]", "")
+end
+
 -- what iwinfo reports in a scan -> the crypto name netifd expects
 local function crypto_for(scan_enc)
-  local e = (scan_enc or ""):upper()
+  -- a value already in netifd's form is used as-is; otherwise map what iwinfo reports
+  local raw = tostring(scan_enc or "")
+  if raw == "none" or raw == "psk" or raw == "psk2" or raw == "psk-mixed" or raw == "sae" then return raw end
+  local e = raw:upper()
   if e == "NONE" or e == "OPEN" or e == "OWE" then return "none" end
   if e:match("WPA3") and e:match("WPA2") then return "psk-mixed" end
   if e:match("WPA3") then return "sae" end
@@ -159,7 +167,7 @@ local function parse_qs(s)
   for k, v in (s or ""):gmatch("([^&=]+)=([^&=]*)") do
     -- form encoding: '+' is a space, so fold it before decoding %XX (a base64 key
     -- arrives as %2B and must keep its '+')
-    out[k] = v:gsub("+", " "):gsub("%%(%x%x)", function(h) return string.char(tonumber(h,16)) end)
+    out[k] = v:gsub("%+", " "):gsub("%%(%x%x)", function(h) return string.char(tonumber(h,16)) end)
   end
   return out
 end
@@ -236,7 +244,7 @@ function R.overview()
   -- wireless APs + station count
   local wl = {}
   local i = 0
-  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+  for sec in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='ap'") do
     wl[#wl+1] = { ssid=uci_get("wireless",sec,"ssid"), radio=uci_get("wireless",sec,"device") }
     i = i + 1; if i > 8 then break end
   end
@@ -453,11 +461,11 @@ function R.wireless()
   local iw = iw_ifaces()
   local status = sh("ubus call network.wireless status 2>/dev/null")
   local radios, ifaces = {}, {}
-  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)=wifi%-device") do
+  for sec in sh("uci show wireless"):gmatch("wireless%.([^%.]+)=wifi%-device") do
     radios[#radios+1] = { name=sec, channel=uci_get("wireless",sec,"channel"),
       band=uci_get("wireless",sec,"band"), disabled=uci_get("wireless",sec,"disabled") }
   end
-  for sec in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+  for sec in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='ap'") do
     local ssid = uci_get("wireless",sec,"ssid")
     local dev = uci_get("wireless",sec,"device")
     local live = nil
@@ -551,12 +559,14 @@ end
 -- UCI section of the station (client) interface, its live interface name and radio
 local function sta_iface()
   local sec, ifn, dev = "", "", ""
-  for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='sta'") do
+  -- section names are either named (wireless.wwan) or anonymous (wireless.@wifi-iface[0])
+  for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='sta'") do
     sec = name; dev = uci_get("wireless", name, "device") break
   end
   if sec ~= "" then
+    -- %s* so the match still works when ubus pretty-prints its JSON
     for s, n in sh("ubus call network.wireless status 2>/dev/null"):gmatch(
-        '"section"%s*:%s*"([^"]+)".-"ifname"%s*:%s*"([^"]+)"') do
+        '"section"%s*:%s*"([^"]+)"%s*.-%s*"ifname"%s*:%s*"([^"]+)"') do
       if s == sec then ifn = n break end
     end
   end
@@ -586,7 +596,7 @@ function R.repeater_status()
     out.net_ip = jf('@["ipv4-address"][0].address')
     out.uptime = tonumber(jf("@.uptime")) or 0
   end
-  for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)%.mode='ap'") do
+  for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)%.mode='ap'") do
     if uci_get("wireless", name, "device") == dev then out.ap_same_radio = out.ap_same_radio + 1 end
   end
   local pid = trim(sh("cat /tmp/wrtweb-repeater.pid 2>/dev/null"))
@@ -602,7 +612,7 @@ function R.repeater_join()
   local radio = qs.radio or ""
   if radio == "" then radio = dev end
   if radio == "" then
-    for name in sh("uci show wireless"):gmatch("wireless%.([%w_]+)=wifi%-device") do radio = name break end
+    for name in sh("uci show wireless"):gmatch("wireless%.([^%.]+)=wifi%-device") do radio = name break end
   end
 
   uci_set("wrtweb.repeater.enabled", "1")
@@ -632,6 +642,7 @@ function R.repeater_action()
       sh("wpa_cli -i " .. ifn .. " reassociate >/dev/null 2>&1")
     end
     sh("wifi reload 2>/dev/null")
+    sh("ubus call network reload 2>/dev/null")
     sh("ifup " .. net .. " 2>/dev/null")
     return { ok=true }
   elseif act == "stop" then
@@ -1142,9 +1153,12 @@ function R.wireguard_new()
 end
 
 function R.wireguard_peer()
-  local iface, peer = norm_name(qs.iface or ""), norm_name(qs.peer or "")
+  local iface, peer = sec_ref(qs.iface or ""), norm_name(qs.peer or "")
   local key = (qs.public_key or ""):gsub("%s+", "")
   if iface == "" or peer == "" or key == "" then return { ok=false, error="missing iface / peer / public key" } end
+  if sh("uci -q show network." .. iface) == "" then
+    return { ok=false, error="interface not found: " .. iface }
+  end
   sh("uci -q delete network." .. peer .. " >/dev/null 2>&1")
   uci_set("network." .. peer, "wireguard_peer")
   uci_set("network." .. peer .. ".public_key", key)
@@ -1157,7 +1171,7 @@ function R.wireguard_peer()
 end
 
 function R.wireguard_del()
-  local name = norm_name(qs.name or "")
+  local name = sec_ref(qs.name or "")
   if name == "" then return { ok=false, error="missing name" } end
   local net = uci_sections("network")
   local s = net[name] or {}
@@ -1194,15 +1208,25 @@ function R.route_add()
   local iface, target, gw, metric = norm_name(qs.interface or ""), (qs.target or ""):gsub("%s+", ""),
                                    (qs.gateway or ""):gsub("%s+", ""), (qs.metric or ""):gsub("%s+", "")
   if iface == "" or target == "" then return { ok=false, error="missing interface / target" } end
+  if sh("uci -q show network." .. iface) == "" then
+    return { ok=false, error="interface not found: " .. iface }
+  end
   sh("uci add network route >/dev/null 2>&1")
-  local count = tonumber(trim(sh("uci -q show network | grep -c '@route\\['"))) or 0
-  local sec = "@route[" .. (count - 1) .. "]"
-  uci_set("network." .. sec .. ".interface", iface)
-  uci_set("network." .. sec .. ".target", target)
-  if gw ~= "" then uci_set("network." .. sec .. ".gateway", gw) end
-  if metric ~= "" then uci_set("network." .. sec .. ".metric", metric) end
+  -- @route[-1] is the section just added. Counting the lines that contain "@route["
+  -- would count the option lines of the routes already there and land on the wrong index.
+  if sh("uci -q show network.@route[-1]") == "" then return { ok=false, error="could not add route" } end
+  uci_set("network.@route[-1].interface", iface)
+  uci_set("network.@route[-1].target", target)
+  if gw ~= "" then uci_set("network.@route[-1].gateway", gw) end
+  if metric ~= "" then uci_set("network.@route[-1].metric", metric) end
   uci_commit("network")
   sh("ubus call network reload 2>/dev/null")
+  -- the name uci will show for it (the delta name is not valid after commit)
+  local net = uci_sections("network")
+  local sec = "@route[-1]"
+  for _, n in ipairs(sorted_names(net)) do
+    if section_kind(n, net[n]) == "route" then sec = n end
+  end
   return { ok=true, section=sec }
 end
 

@@ -31,8 +31,11 @@ crypto() {
 
 # name of the interface netifd created for our station section
 live_iface() {
-	ubus call network.interface."$NET" status 2>/dev/null \
-		| jsonfilter -e '@.l3_device' 2>/dev/null
+	ifn="$(ubus call network.interface."$NET" status 2>/dev/null \
+		| jsonfilter -e '@.l3_device' 2>/dev/null)"
+	# jsonfilter prints the word null for a missing key
+	case "$ifn" in null|"") return 1 ;; esac
+	echo "$ifn"
 }
 
 link_ok() {
@@ -53,7 +56,9 @@ ensure_iface() {
 	uci -q get "wireless.$sec" >/dev/null 2>&1 || uci set "wireless.$sec=wifi-iface"
 
 	radio="$(g radio)"
-	[ -n "$radio" ] || radio="$(uci -q get wireless.@wifi-device[0].name)"
+	# uci's `device=` refers to the wifi-device *section*, not its option name
+	[ -n "$radio" ] || radio="$(uci -q show wireless 2>/dev/null | grep -m1 '=wifi-device' \
+		| sed 's/^wireless\.\([^\.]*\)=.*/\1/')"
 	[ -n "$radio" ] || radio=radio0
 
 	enc="$(crypto "$(g encryption)")"
@@ -88,6 +93,9 @@ apply_repeater() {
 	[ -n "$(g ssid)" ] || { echo "no ssid"; return 1; }
 
 	sec="$(ensure_iface)"
+	# `uci commit` does not make netifd aware of a new interface, so reload first,
+	# otherwise `ifup wwan` reports "Interface wwan not found"
+	ubus call network reload 2>/dev/null
 	wifi reload 2>/dev/null
 	ifup "$NET" 2>/dev/null
 
@@ -106,7 +114,9 @@ apply_repeater() {
 	fi
 
 	if [ "$(g auto)" != "0" ]; then
-		watch &
+		# the watchdog must not inherit stdout: the CGI reads this pipe until EOF, and a
+		# background process holding it open would keep the join request hanging
+		watch >> "$LOG" 2>&1 < /dev/null &
 	fi
 }
 

@@ -5,6 +5,11 @@
 START=95
 
 start() {
+	# the Clients page reads per-address traffic from the conntrack table, which only
+	# holds byte counters when accounting is enabled
+	if [ -w /proc/sys/net/netfilter/nf_conntrack_acct ]; then
+		echo 1 > /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null
+	fi
 	[ "$(uci -q get wrtweb.repeater.enabled)" = "1" ] || return 0
 	sh /usr/libexec/wrtweb/repeater.sh apply >/dev/null 2>&1 &
 }

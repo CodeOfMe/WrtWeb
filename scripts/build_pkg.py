@@ -5,7 +5,7 @@ without the OpenWrt SDK. Outputs to dist/.
 import os, sys, tarfile, io, gzip, shutil, time, stat
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VER = "0.3.7"
+VER = "0.3.8"
 PKG = "wrtweb"
 DESC = "GL.iNet-style web admin panel for OpenWrt (repeater/hotspot/VPN/NAS/mirror/theme)"
 DIST = os.path.join(ROOT, "dist")

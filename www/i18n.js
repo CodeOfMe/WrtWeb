@@ -132,7 +132,7 @@ window.I18N = {
       route_note:"Static routes are netifd UCI routes - the open-source equivalent of the policy routes here.",
       default_routes:"Default routes", add_route:"Add route", destination:"Destination", metric:"Metric",
       policy_note:"mwan3 is installed, so policy-based routing is applied on top of these routes.",
-      add_peer:"Add peer", optional:"optional",
+      add_peer:"Add peer", optional:"optional", create:"Create",
       wg_note:"AstroWarp is the open-source WireGuard stack (netifd's wireguard proto): create an interface, add peers by public key.",
       wg_peer_note:"Paste the peer's own public key - the peer keeps its private key. netifd applies the change on save."
     }
@@ -269,7 +269,7 @@ window.I18N = {
       route_note:"静态路由就是 netifd 的 UCI 路由，即策略路由的开源实现。",
       default_routes:"默认路由", add_route:"添加路由", destination:"目标网段", metric:"度量值",
       policy_note:"已安装 mwan3，策略路由会在这些路由之上生效。",
-      add_peer:"添加对端", optional:"可选",
+      add_peer:"添加对端", optional:"可选", create:"创建",
       wg_note:"AstroWarp 即开源的 WireGuard（netifd 的 wireguard 协议）：新建接口，按公钥添加对端。",
       wg_peer_note:"粘贴对端自己的公钥，对端保留它的私钥；保存后由 netifd 应用。"
     }
